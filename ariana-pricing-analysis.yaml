@@ -73,16 +73,92 @@ analysis_scenarios:
 
   dynamic_provisioning_model:
     description: "Spin up/delete servers on-demand, billed per minute"
+    cli_discoveries:
+      pricing_data: |
+        hcloud server-type describe cax11: €0.0053/hour
+        hcloud server-type describe cx22: €0.0052/hour
+        hcloud server-type describe cpx11: €0.0072/hour
+      mathematical_proof: |
+        echo "4.5 / 0.0052" | bc = 865 hours
+        echo "4.5 / 0.0053" | bc = 849 hours
+        echo "849 / 300" | bc = 2.83 hours per agent
+      server_specs: |
+        cax11 ARM: 2 cores, 4GB RAM, 40GB SSD, €3.29/month
+        cx22 x86: 2 cores, 4GB RAM, 40GB SSD, €3.29/month
+        cpx11 x86: 2 cores, 2GB RAM, 40GB SSD, €3.85/month
+
+    hard_math_calculations:
+      ariana_pricing_vs_hetzner: |
+        Ariana Max Plan: €4.99/month
+        Compute hours available: €4.99 ÷ €0.0052 = 959.6 hours
+        Per agent allocation: 959.6 ÷ 300 = 3.20 hours per agent
+        Daily average: 3.20 ÷ 30 = 0.107 hours = 6.4 minutes per day
+
+      cost_per_session: |
+        30 min session: 0.5 × €0.0052 = €0.0026
+        60 min session: 1.0 × €0.0052 = €0.0052
+        8 hour workday: 8.0 × €0.0052 = €0.0416
+        24 hour continuous: 24.0 × €0.0052 = €0.1248
+
+      profit_margins_by_usage: |
+        1 hour usage: €4.99 - €0.0052 = €4.98 profit (99.9% margin)
+        10 hours usage: €4.99 - €0.052 = €4.94 profit (98.9% margin)
+        50 hours usage: €4.99 - €0.26 = €4.73 profit (94.8% margin)
+        100 hours usage: €4.99 - €0.52 = €4.47 profit (89.6% margin)
+        460 hours usage: €4.99 - €2.39 = €2.60 profit (52.1% margin)
+        960 hours usage: €4.99 - €4.99 = €0.00 profit (0% margin)
+
+      breakeven_analysis: |
+        Breakeven point: €4.99 ÷ €0.0052 = 959.6 hours
+        Daily breakeven: 959.6 ÷ 30 = 32 hours per day
+        If users average >32 hours/day, Ariana loses money
+
+      oversubscription_mathematics: |
+        1000 users × 300 agents = 300,000 agent launches
+        If each averages 15 minutes: 300,000 × 0.25 = 75,000 hours needed
+        Actual server hours sold: 1000 × 959.6 = 959,600 hours
+        Oversubscription ratio: 959,600 ÷ 75,000 = 12.8x
+
+      comparison_with_standard_vps: |
+        Standard VPS provider: $5/month = 744 hours (1 server)
+        Ariana Max Plan: €4.99 = 959 hours (shared across 300 "agents")
+        Efficiency gain: 959 ÷ 744 = 1.29x more compute hours per dollar
+
     assumptions:
       average_session: "30-60 minutes per agent task"
       cost_per_session: "€0.0026-0.006 (essentially negligible)"
       typical_usage: "Most users won't utilize full quota"
+      oversubscription_ratio: "10:1 to 50:1 depending on user behavior"
+      session_frequency: "Most users run agents sporadically, not continuously"
+
+    technical_implementation:
+      server_lifecycle: |
+        User requests agent → Spin up Hetzner server → Run task →
+        Immediate deletion → Bill exact minutes used
+      resource_pooling: "Multiple users share same physical servers over time"
+      cost_optimization: "Use cheapest ARM servers (cax11) by default"
+      queue_management: "Potential wait times during peak demand"
+
     profit_calculation:
       max_plan_example:
         budget: "€4.99/month = 950 hours compute"
         if_150h_used: "150 × €0.0052 = €0.78 cost"
         profit_margin: "84% (€4.21 profit per user)"
-    conclusion: "Most likely business model"
+        breakeven_point: "~46 hours usage per month makes €4.99 break even"
+
+    behavioral_analysis:
+      user_psychology: |
+        Users see "300 agents" and think infrastructure, not compute minutes
+        Similar to "unlimited hosting" that actually has limits
+        Marketing leverages server ownership language for time-sharing service
+
+      usage_patterns:
+        casual_users: "<5 hours/month (6x profit margin)"
+        moderate_users: "20-50 hours/month (2-10x profit margin)"
+        heavy_users: ">100 hours/month (still profitable at scale)"
+        power_users: "Target for upsell to Ultra tier or enterprise plans"
+
+    conclusion: "Most likely business model - highly profitable if usage assumptions hold"
 
 # Realistic Cost Examples
 usage_examples:
