@@ -5,6 +5,16 @@
     "ANTHROPIC_MODEL": "glm-4.6",
     "ANTHROPIC_SMALL_FAST_MODEL": "glm-4.5"
   },
+  "permissions": {
+    "allow": [
+      "Bash(hcloud server-type list:*)",
+      "Bash(sort:*)",
+      "Bash(hcloud server-type describe:*)",
+      "Bash(for server in cax11 cpx11 cx22 cx32)",
+      "Bash(do echo \"=== $server ===\":*)",
+      "Bash(done)"
+    ]
+  },
   "bashAliases": {
     "python": "uv run python",
     "python3": "uv run python",

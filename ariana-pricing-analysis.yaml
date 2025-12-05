@@ -1,0 +1,172 @@
+---
+title: "Ariana.dev Pricing Model Analysis vs Hetzner Infrastructure Costs"
+date: "2025-12-05"
+analysis_by: "Ebowwa Labs"
+
+# Ariana.dev Pricing Tiers
+ariana_pricing:
+  free:
+    monthly_cost: "$0"
+    agents_allowed: 30
+    description: "Launch up to 30 agents"
+
+  max:
+    monthly_cost: "$4.99"
+    agents_allowed: 300
+    description: "Launch up to 300 agents (10x more than free)"
+
+  ultra:
+    monthly_cost: "$45"
+    agents_allowed: 3000
+    description: "Launch up to 3000 agents (100x more than free)"
+
+# Hetzner Infrastructure Costs (Nuremberg - nbg1)
+hetzner_pricing:
+  cheapest_servers:
+    cax11_arm:
+      hourly: "€0.0053"
+      monthly: "€3.29"
+      specs:
+        cores: 2
+        architecture: "ARM"
+        ram: "4GB"
+        storage: "40GB SSD"
+        cpu_type: "shared"
+
+    cx22_x86:
+      hourly: "€0.0052"
+      monthly: "€3.29"
+      specs:
+        cores: 2
+        architecture: "x86"
+        ram: "4GB"
+        storage: "40GB SSD"
+        cpu_type: "shared"
+
+    cpx11_x86:
+      hourly: "€0.0072"
+      monthly: "€3.85"
+      specs:
+        cores: 2
+        architecture: "x86"
+        ram: "2GB"
+        storage: "40GB SSD"
+        cpu_type: "shared"
+
+# Cost Analysis Scenarios
+analysis_scenarios:
+  persistent_agents_per_server:
+    description: "If each agent = 1 dedicated server 24/7"
+    findings:
+      free_tier_loss: "€98.70/month per user (30 × €3.29)"
+      max_tier_loss: "€982.01/month per user (300 × €3.29 - €4.99)"
+      ultra_tier_loss: "€9,825/month per user (3,000 × €3.29 - €45)"
+    conclusion: "Completely unsustainable model"
+
+  time_sharing_model:
+    description: "Pooling resources where agents share compute time"
+    calculations:
+      max_plan_budget: "€4.99 = ~950 hours of compute"
+      agents_share: "300 agents ÷ 950 hours = ~3.2 hours per agent per month"
+      daily_usage: "~6 minutes per day per agent"
+    conclusion: "More plausible but misleading marketing"
+
+  dynamic_provisioning_model:
+    description: "Spin up/delete servers on-demand, billed per minute"
+    assumptions:
+      average_session: "30-60 minutes per agent task"
+      cost_per_session: "€0.0026-0.006 (essentially negligible)"
+      typical_usage: "Most users won't utilize full quota"
+    profit_calculation:
+      max_plan_example:
+        budget: "€4.99/month = 950 hours compute"
+        if_150h_used: "150 × €0.0052 = €0.78 cost"
+        profit_margin: "84% (€4.21 profit per user)"
+    conclusion: "Most likely business model"
+
+# Realistic Cost Examples
+usage_examples:
+  "30 minute coding session": "€0.0026 (cax11) to €0.0036 (cpx11)"
+  "1 hour debugging": "€0.0052 to €0.0072"
+  "8 hour workday": "€0.04 to €0.06"
+  "24 hour continuous": "€0.12 to €0.17"
+
+# Business Model Insights
+business_model:
+  marketing_vs_reality:
+    perceived: "300 persistent agents running simultaneously"
+    actual: "300 agent launches totaling ~3 hours of compute"
+    psychology: "Users think they get servers, actually get compute minutes"
+
+  key_assumptions:
+    - "Most users run agents for short tasks (minutes, not hours)"
+    - "Significant oversubscription - most quota goes unused"
+    - "Dynamic spin-up/delete to minimize costs"
+    - "Arbitrage between perception and actual compute usage"
+
+# Technical Implementation
+technical_approach:
+  likely_infrastructure:
+    orchestration: "Container-based multi-tenancy on Hetzner servers"
+    provisioning: "API-driven server spin-up/delete via Hetzner CLI"
+    billing: "Track exact usage time per user"
+    queue_system: "Potential wait times during high demand"
+
+  cost_optimization:
+    - "Use cheapest ARM servers (cax11) when possible"
+    - "Immediate server deletion when tasks complete"
+    - "Pool-based resource sharing"
+    - "Geographic arbitrage (nbg1 cheapest location)"
+
+# Conclusion
+conclusion:
+  sustainability: "Model is profitable if usage patterns align with assumptions"
+  transparency: "Marketing potentially misleading - 'agents' ≠ 'persistent servers'"
+  target_market: "Users who understand they're buying compute minutes, not dedicated infrastructure"
+  scalability: "Highly scalable due to minimal per-user marginal costs"
+
+# CLI Commands Used for Analysis
+cli_commands:
+  hetzner_pricing_query:
+    - "hcloud server-type list | sort -k6 -n | head -20"
+    - "hcloud server-type describe cax11 --output json | jq '.prices[] | select(.location == \"nbg1\")'"
+    - "hcloud server-type describe cpx11 --output json | jq '.prices[] | select(.location == \"nbg1\")'"
+    - "hcloud server-type describe cx22 --output json | jq '.prices[] | select(.location == \"nbg1\")'"
+
+# Mathematical Formulas Used
+formulas:
+  cost_calculations:
+    monthly_hours_from_budget: "budget_amount ÷ hourly_rate = total_hours"
+    example: "€4.99 ÷ €0.0053 = 942 hours"
+
+    hours_per_agent_time_sharing: "total_hours ÷ number_of_agents = hours_per_agent"
+    example: "942 hours ÷ 300 agents = 3.14 hours per agent"
+
+    daily_usage_from_monthly: "monthly_hours_per_agent ÷ 30_days = daily_hours"
+    example: "3.14 ÷ 30 = 0.105 hours = 6.3 minutes per day"
+
+    cost_per_session: "session_duration_hours × hourly_rate = cost"
+    example: "0.5 hours × €0.0053 = €0.00265"
+
+    profit_margin_per_user: "revenue - (usage_hours × hourly_rate) = profit"
+    example: "€4.99 - (150 × €0.0052) = €4.21"
+
+    profit_percentage: "(profit ÷ revenue) × 100 = profit_margin_%"
+    example: "(€4.21 ÷ €4.99) × 100 = 84.4%"
+
+  persistent_server_costs:
+    monthly_cost_per_user: "number_of_agents × server_monthly_cost = total_cost"
+    free_tier_loss: "30 × €3.29 = €98.70/month"
+    max_tier_loss: "(300 × €3.29) - €4.99 = €982.01/month"
+    ultra_tier_loss: "(3,000 × €3.29) - €45 = €9,825/month"
+
+  calculation_commands:
+    - "echo \"4.5 / 0.0052\" | bc"    # Calculate hours from budget
+    - "echo \"4.5 / 0.0053\" | bc"    # Calculate hours from budget (ARM)
+    - "echo \"849 / 300\" | bc"       # Calculate hours per agent (time-sharing)
+
+notes:
+  - "Analysis assumes standard Hetzner pricing without special enterprise discounts"
+  - "Real costs may vary based on actual usage patterns and infrastructure efficiency"
+  - "Model similar to cloud reselling with better packaging"
+  - "All pricing data retrieved via Hetzner CLI (hcloud) and confirmed via jq JSON parsing"
