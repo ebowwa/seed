@@ -23,6 +23,26 @@
 
 Environment-aware setup system that automatically detects your context (VPS, Codespaces, local dev) and installs only the tools you need.
 
+---
+
+<div align="center">
+
+# 🔥 LIMITED TIME DEAL 🔥
+
+### 🚀 GLM CODING PLAN — **$3/MONTH** 🚀
+
+**Claude Code + Cline + 10+ Coding Tools** — All in one place!
+
+**Referral Code:** `DVARAUG0U8`
+
+[![Subscribe Now](https://img.shields.io/badge/SUBSCRIBE-NOW-red?style=for-the-badge&logo=golang&logoColor=white&labelColor=orange&color=red)](https://z.ai/subscribe?ic=DVARAUG0U8)
+
+**Don't miss out!** ⏰ [See all deals](./docs/affiliate-referrals.md)
+
+</div>
+
+---
+
 ## 🎯 Smart Environment Detection
 
 The setup script automatically detects your environment and configures it appropriately:
