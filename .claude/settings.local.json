@@ -12,7 +12,8 @@
       "Bash(hcloud server-type describe:*)",
       "Bash(for server in cax11 cpx11 cx22 cx32)",
       "Bash(do echo \"=== $server ===\":*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(mkdir:*)"
     ]
   },
   "bashAliases": {

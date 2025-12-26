@@ -35,7 +35,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/situations.yaml"
 
 # Default AI assistant selection (can be overridden via env or CLI)
-DEFAULT_AI_ASSISTANT="zai"
+DEFAULT_AI_ASSISTANT="claude"
 
 # Determine if an AI assistant value is supported
 is_valid_ai_assistant() {
@@ -411,8 +411,8 @@ configure_claude_for_zai() {
     local settings_dir="$HOME/.claude"
     local settings_file="$settings_dir/settings.json"
     local base_url="${ANTHROPIC_BASE_URL:-https://api.z.ai/api/anthropic}"
-    local primary_model="${ANTHROPIC_MODEL:-glm-4.5}"
-    local fast_model="${ANTHROPIC_SMALL_FAST_MODEL:-glm-4.5-air}"
+    local primary_model="${ANTHROPIC_MODEL:-glm-4.7}"
+    local fast_model="${ANTHROPIC_SMALL_FAST_MODEL:-glm-4.6}"
     local auth_token="${ANTHROPIC_AUTH_TOKEN:-$ZAI_API_KEY}"
 
     mkdir -p "$settings_dir"
@@ -1313,13 +1313,40 @@ main() {
     fi
 
     if [ -z "$AI_ASSISTANT" ]; then
-        AI_ASSISTANT="$DEFAULT_AI_ASSISTANT"
+        # Interactive prompt for Z.ai backend
+        echo ""
+        read -p "Do you want to use Z.ai backend? (y/N): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            AI_ASSISTANT="zai"
+        else
+            AI_ASSISTANT="$DEFAULT_AI_ASSISTANT"
+        fi
     fi
 
     if ! is_valid_ai_assistant "$AI_ASSISTANT"; then
         print_error "Unsupported AI assistant: $AI_ASSISTANT"
         echo "Valid options: codex, claude, zai"
         exit 1
+    fi
+
+    # Interactive prompts for MCP servers (only if not already skipped via flags)
+    if [[ ! " ${USER_SKIP_TOOLS[*]} " =~ " vision-mcp-server " ]]; then
+        echo ""
+        read -p "Install Vision MCP Server (image/video analysis)? (Y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            USER_SKIP_TOOLS+=("vision-mcp-server")
+        fi
+    fi
+
+    if [[ ! " ${USER_SKIP_TOOLS[*]} " =~ " web-search-mcp " ]]; then
+        echo ""
+        read -p "Install Web Search MCP Server (web search capabilities)? (Y/n): " -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            USER_SKIP_TOOLS+=("web-search-mcp")
+        fi
     fi
 
     # Detect the operating system (macOS, Linux, etc.)

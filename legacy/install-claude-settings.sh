@@ -11,6 +11,11 @@ SETTINGS_LOCAL="${SCRIPT_DIR}/.claude/settings.local.json"
 CLAUDE_SETTINGS_DIR="$HOME/.claude"
 CLAUDE_SETTINGS_FILE="$CLAUDE_SETTINGS_DIR/settings.json"
 
+# Load environment variables from .env if present
+if [ -f "${SCRIPT_DIR}/.env" ]; then
+    export $(cat "${SCRIPT_DIR}/.env" | grep -v '^#' | xargs)
+fi
+
 # Determine Claude configuration based on environment
 AI_ASSISTANT="${AI_ASSISTANT:-claude}"
 
@@ -35,13 +40,18 @@ fi
 case "$AI_ASSISTANT" in
     zai)
         echo "📋 Configuring Claude Code for Z.ai backend..."
-        cat > "$CLAUDE_SETTINGS_FILE" << 'EOF'
+        # Read values from environment, with fallbacks
+        BASE_URL="${ANTHROPIC_BASE_URL:-https://api.z.ai/api/anthropic}"
+        MODEL="${ANTHROPIC_MODEL:-glm-4.7}"
+        FAST_MODEL="${ANTHROPIC_SMALL_FAST_MODEL:-glm-4.6}"
+
+        cat > "$CLAUDE_SETTINGS_FILE" << EOF
 {
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "\$schema": "https://json.schemastore.org/claude-code-settings.json",
   "env": {
-    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-    "ANTHROPIC_MODEL": "glm-4.5",
-    "ANTHROPIC_SMALL_FAST_MODEL": "glm-4.5-air"
+    "ANTHROPIC_BASE_URL": "$BASE_URL",
+    "ANTHROPIC_MODEL": "$MODEL",
+    "ANTHROPIC_SMALL_FAST_MODEL": "$FAST_MODEL"
   },
   "mcpServers": {
     "zai-mcp-server": {
@@ -52,15 +62,15 @@ case "$AI_ASSISTANT" in
         "@z_ai/mcp-server"
       ],
       "env": {
-        "Z_AI_API_KEY": "${Z_AI_API_KEY}",
-        "Z_AI_MODE": "ZAI"
+        "Z_AI_API_KEY": "\${Z_AI_API_KEY}",
+        "Z_AI_MODE": "\${Z_AI_MODE:-ZAI}"
       }
     },
     "web-search-prime": {
       "type": "http",
       "url": "https://api.z.ai/api/mcp/web_search_prime/mcp",
       "headers": {
-        "Authorization": "Bearer ${Z_AI_API_KEY}"
+        "Authorization": "Bearer \${Z_AI_API_KEY}"
       }
     }
   },
@@ -77,9 +87,9 @@ EOF
         echo "✅ Z.ai configuration applied!"
         echo ""
         echo "🎯 Settings configured for:"
-        echo "   • Base URL: https://api.z.ai/api/anthropic"
-        echo "   • Primary Model: glm-4.5"
-        echo "   • Fast Model: glm-4.5-air"
+        echo "   • Base URL: $BASE_URL"
+        echo "   • Primary Model: $MODEL"
+        echo "   • Fast Model: $FAST_MODEL"
         echo "   • Vision MCP Server: @z_ai/mcp-server"
         echo "   • Web Search MCP Server: Z.AI web search capabilities"
         echo "   • UV integration for Python"
