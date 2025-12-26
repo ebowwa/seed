@@ -1,0 +1,118 @@
+name: Track Claude Code Changes
+
+on:
+  workflow_dispatch:  # Allow manual trigger
+  schedule:
+    # Run daily at 6:00 PM UTC
+    - cron: '0 18 * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  track-claude-code:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch latest Claude Code CHANGELOG
+        id: fetch-changelog
+        run: |
+          # Fetch the latest CHANGELOG from anthropics/claude-code
+          curl -s https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md -o /tmp/claude-code-changelog.md
+
+          # Get the latest version number
+          LATEST_VERSION=$(grep -m 1 "^## " /tmp/claude-code-changelog.md | sed 's/^## //' | sed 's/ .*//')
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+          # Store the full changelog
+          cp /tmp/claude-code-changelog.md /tmp/full-changelog.md
+
+      - name: Check for new version
+        id: check-version
+        run: |
+          TRACKED_FILE="docs/claude-code-tracked-versions.md"
+          LATEST_VERSION="${{ steps.fetch-changelog.outputs.latest_version }}"
+
+          # Create tracked file if it doesn't exist
+          if [ ! -f "$TRACKED_FILE" ]; then
+            echo "# Claude Code Tracked Versions" > "$TRACKED_FILE"
+            echo "" >> "$TRACKED_FILE"
+            echo "| Date | Version | Status |" >> "$TRACKED_FILE"
+            echo "|------|---------|--------|" >> "$TRACKED_FILE"
+            LAST_TRACKED=""
+          else
+            # Get last tracked version
+            LAST_TRACKED=$(grep -oP '\|\s*\d{4}-\d{2}-\d{2}\s*\|\s*\K[\d.]+' "$TRACKED_FILE" | head -1)
+          fi
+
+          # Check if version changed
+          if [ "$LATEST_VERSION" != "$LAST_TRACKED" ] && [ -n "$LAST_TRACKED" ]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "New version detected: $LATEST_VERSION (was: $LAST_TRACKED)"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "No new version (current: $LATEST_VERSION)"
+          fi
+
+          echo "$LAST_TRACKED" > /tmp/last-tracked.txt
+
+      - name: Extract new changelog entries
+        id: extract-new
+        if: steps.check-version.outputs.version_changed == 'true' || hashFiles('docs/claude-code-tracked-versions.md') == ''
+        run: |
+          LAST_TRACKED=$(cat /tmp/last-tracked.txt)
+
+          # Create new entries document
+          OUTPUT_FILE="docs/claude-code-new-changes.md"
+
+          echo "# Claude Code - New Changes" > "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "*Last checked: $(date -u +"%Y-%m-%d %H:%M:%S UTC")*" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+          echo "## Version ${{ steps.fetch-changelog.outputs.latest_version }}" >> "$OUTPUT_FILE"
+          echo "" >> "$OUTPUT_FILE"
+
+          # Extract changelog content until we hit the last tracked version (or end of file)
+          if [ -n "$LAST_TRACKED" ]; then
+            awk "
+              /^## $LAST_TRACKED/ { exit }
+              /^## / && !started { started=1; next }
+              started { print }
+            " /tmp/full-changelog.md >> "$OUTPUT_FILE"
+          else
+            # First time tracking, get everything
+            awk '/^## / { if (content) exit; content=1; next } content { print }' /tmp/full-changelog.md >> "$OUTPUT_FILE"
+          fi
+
+          echo "Extracted new changes to $OUTPUT_FILE"
+
+      - name: Update tracked versions
+        run: |
+          TRACKED_FILE="docs/claude-code-tracked-versions.md"
+          LATEST_VERSION="${{ steps.fetch-changelog.outputs.latest_version }}"
+          TODAY=$(date -u +"%Y-%m-%d")
+
+          # Add new entry at the top of the table (after header)
+          if grep -q "$LATEST_VERSION" "$TRACKED_FILE"; then
+            echo "Version $LATEST_VERSION already tracked"
+          else
+            # Insert new version entry after the table header
+            sed -i "/|------|---------|/a| $TODAY | $LATEST_VERSION | ✅ Tracked |" "$TRACKED_FILE"
+            echo "Added version $LATEST_VERSION to tracking"
+          fi
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add docs/claude-code-tracked-versions.md docs/claude-code-new-changes.md 2>/dev/null || true
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: track Claude Code version ${{ steps.fetch-changelog.outputs.latest_version }}"
+            git push
+          fi
