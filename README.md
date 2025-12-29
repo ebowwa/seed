@@ -15,7 +15,7 @@ Environment-aware setup system that automatically detects your context (VPS, Cod
 **Referral Code:** `DVARAUG0U8`
 
 <a href="https://z.ai/subscribe?ic=DVARAUG0U8">
-  <img src="https://img.shields.io/badge/SUBSCRIBE_NOW-GET_STARTED-red?style=for-the-badge&logoColor=white&labelColor=dc143c&color=ff0000&animation=pulse" alt="Subscribe Now">
+  <img src="https://img.shashes.io/badge/SUBSCRIBE_NOW-GET_STARTED-red?style=for-the-badge&logoColor=white&labelColor=dc143c&color=ff0000&animation=pulse" alt="Subscribe Now">
 </a>
 
 </div>
@@ -41,6 +41,7 @@ cd seed
 | **Vision MCP** | Image/video analysis (Z.ai) |
 | **Web Search MCP** | Real-time web search (Z.ai) |
 | **GitHub MCP** | Repository intelligence |
+| **chat.sh** | Persistent Claude conversations |
 
 ## Configuration
 
@@ -84,13 +85,51 @@ doppler login
 doppler run --project seed --config prd -- claude
 ```
 
+### Chat Script (Persistent Conversations)
+
+The `chat.sh` wrapper enables persistent conversations with Claude across sessions.
+
+```bash
+# Basic usage
+./chat.sh "your prompt here"
+
+# Custom project/config
+./chat.sh "prompt" --project myproj --config dev
+
+# Via environment variables
+DOPPLER_PROJECT=other DOPPLER_CONFIG=staging ./chat.sh "prompt"
+```
+
+**How it works:**
+- Maintains conversation history in `/tmp/c.txt`
+- Each prompt includes full conversation context
+- Loads secrets from Doppler (configurable)
+- Resets when `/tmp/c.txt` is deleted
+
+### Distributed Claude
+
+Communicate with a remote Claude instance on a VPS for distributed AI workflows.
+
+```bash
+# Example: Chat with remote Claude on Hetzner server
+ssh ebowwa-deptwar "cd ~/seed && ./chat.sh 'your prompt'"
+```
+
+**Use cases:**
+- Different backends (Z.ai GLM vs Anthropic)
+- Independent context/persistence
+- Multi-Claude collaboration
+- Test prompts across models without local config changes
+
 ## Files
 
 - `setup.sh` - Main installation script
 - `situations.yaml` - Environment/tool configs
+- `chat.sh` - Persistent conversation wrapper
 - `.env.example` - API key template
 - `.claude/settings.template.json` - Claude settings template
 - `.claude/settings.local.json` - Local Claude settings
+- `.claude/commands/` - Claude Code skills (see `distributed-claude.md`)
 
 ## Docs
 
