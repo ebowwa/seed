@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "mcp__XcodeBuildMCP__*",
-      "Bash(*)",
-      "Bash(git -C /workspaces/caringmind-ios checkout -b fix/claude-settings-permissions)"
-    ]
-  }
-}
