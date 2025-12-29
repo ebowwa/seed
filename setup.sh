@@ -439,7 +439,14 @@ configure_claude_for_zai() {
             
             # Try to load secrets from Doppler
             local config_name="${DOPPLER_CONFIG:-dev}"
-            if eval $(doppler secrets download --config "$config_name" --format env --no-file 2>/dev/null); then
+            # Safe: use temp file instead of eval
+            local secrets_file
+            secrets_file=$(mktemp)
+            if doppler secrets download --config "$config_name" --format env --no-file > "$secrets_file" 2>/dev/null; then
+                set -a
+                source "$secrets_file"
+                set +a
+                rm -f "$secrets_file"
                 auth_token="$ANTHROPIC_AUTH_TOKEN"
                 base_url="$ANTHROPIC_BASE_URL"
                 primary_model="$ANTHROPIC_MODEL"

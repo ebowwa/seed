@@ -50,7 +50,13 @@ echo ""
 echo "🧪 Step 3: Testing Claude Code configuration..."
 
 # Load environment from Doppler
-eval $(doppler secrets download --config dev --format env --no-file)
+# Safe: use temp file instead of eval
+SECRETS_FILE=$(mktemp)
+doppler secrets download --config dev --format env --no-file > "$SECRETS_FILE"
+set -a
+source "$SECRETS_FILE"
+set +a
+rm -f "$SECRETS_FILE"
 
 # Check if Claude is configured
 if [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
