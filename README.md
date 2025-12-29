@@ -55,23 +55,6 @@ DOPPLER_TOKEN=dp.st.xxx
 TAILSCALE_AUTH_KEY=tskey-xxx
 ```
 
-### Using Claude Code with Z.ai
-
-```bash
-# Load Z.ai config from Doppler
-eval $(doppler secrets download --config dev --format env --no-file)
-
-# Start Claude Code
-claude
-```
-
-### Claude Settings
-
-```bash
-# Install Z.ai-optimized settings
-./install-claude-settings.sh
-```
-
 ## Environments
 
 | Environment | Tools |
@@ -92,9 +75,13 @@ tailscale up       # macOS
 
 # Doppler
 doppler login
+```
 
-# Claude Code status (Z.ai)
-claude /status
+### Using Claude Code with Z.ai
+
+```bash
+# Run Claude Code with Z.ai config from Doppler
+doppler run --project seed --config prd -- claude
 ```
 
 ## Files
