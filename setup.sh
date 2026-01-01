@@ -1077,7 +1077,7 @@ verify_installations() {
         if command_exists "$assistant_cmd"; then
             local version_output
             if [ "$assistant_cmd" = "codex" ]; then
-                version_output=$($assistant_cmd --version 2>/dev/null | tail -n1)
+                version_output=$($assistant_cmd --version 2>/dev/null)
                 if [ -z "$version_output" ]; then
                     version_output="installed"
                 fi
@@ -1094,7 +1094,7 @@ verify_installations() {
     # Check GitHub CLI
     if should_install_tool "github-cli"; then
         if command_exists gh; then
-            print_success "GitHub CLI: $(gh --version | head -n1)"
+            print_success "GitHub CLI: $(gh --version | head -1 || true)"
         else
             print_error "GitHub CLI: not found"
             all_good=false
@@ -1114,7 +1114,7 @@ verify_installations() {
     # Check Tailscale
     if should_install_tool "tailscale"; then
         if command_exists tailscale; then
-            print_success "Tailscale: $(tailscale --version | head -n1)"
+            print_success "Tailscale: $(tailscale --version | head -1 || true)"
         else
             print_error "Tailscale: not found"
             all_good=false
@@ -1187,6 +1187,302 @@ run_additional_setup() {
 
 # Main entry point for the script
 # Handles argument parsing, environment detection, and orchestrates the installation
+# ============================================================================
+# Health Check Functions
+# ============================================================================
+
+# Health check state variables
+HEALTH_CRITICAL_COUNT=0
+HEALTH_WARNING_COUNT=0
+HEALTH_SUCCESS_COUNT=0
+HEALTH_JSON_OUTPUT=false
+HEALTH_RESULTS=()
+
+# Record a health check result
+health_record() {
+    local status="$1"
+    local component="$2"
+    local message="$3"
+    local suggested_fix="${4:-}"
+
+    case "$status" in
+        success) ((HEALTH_SUCCESS_COUNT++)) ;;
+        warning) ((HEALTH_WARNING_COUNT++)) ;;
+        critical) ((HEALTH_CRITICAL_COUNT++)) ;;
+    esac
+
+    HEALTH_RESULTS+=("$status|$component|$message|$suggested_fix")
+}
+
+check_core_tools() {
+    print_info "Checking core tools..."
+
+    # GitHub CLI
+    if command_exists gh; then
+        local gh_version=$(gh --version 2>/dev/null)
+        if gh auth status >/dev/null 2>&1; then
+            local gh_user=$(gh auth status 2>/dev/null | grep "Logged in as" | sed 's/.*Logged in as //' | sed 's/ .*//')
+            health_record "success" "GitHub CLI" "$gh_version (logged in as ${gh_user:-unknown})"
+        else
+            health_record "warning" "GitHub CLI" "$gh_version (not authenticated)" "Run 'gh auth login' to authenticate"
+        fi
+    else
+        health_record "warning" "GitHub CLI" "not found" "Install with: brew install gh (macOS) or apt install gh (Linux)"
+    fi
+
+    # Doppler
+    if command_exists doppler; then
+        local doppler_version=$(doppler --version 2>/dev/null || echo installed)
+        if doppler whoami >/dev/null 2>&1; then
+            local doppler_user=$(doppler whoami 2>/dev/null | grep "Name" | cut -d':' -f2 | xargs || echo "unknown")
+            health_record "success" "Doppler" "$doppler_version (authenticated as ${doppler_user:-user})"
+        else
+            health_record "warning" "Doppler" "$doppler_version (not authenticated)" "Run 'doppler login' to authenticate"
+        fi
+    else
+        health_record "warning" "Doppler" "not found" "Install with: brew install dopplerhq/tap/doppler (macOS) or apt install doppler (Linux)"
+    fi
+
+    # Tailscale
+    if command_exists tailscale; then
+        local ts_version=$(tailscale --version 2>/dev/null)
+        if tailscale status >/dev/null 2>&1; then
+            local ts_status=$(tailscale status --json 2>/dev/null | grep -o '"BackendState":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+            if [ "$ts_status" = "Running" ]; then
+                local ts_name=$(tailscale status --json 2>/dev/null | grep -o '"Self":{"NickName":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+                health_record "success" "Tailscale" "$ts_version (connected as ${ts_name:-device})"
+            else
+                health_record "warning" "Tailscale" "$ts_version (status: $ts_status)" "Run 'sudo tailscale up' to connect"
+            fi
+        else
+            health_record "warning" "Tailscale" "$ts_version (not connected)" "Run 'sudo tailscale up' to connect"
+        fi
+    else
+        health_record "warning" "Tailscale" "not found" "Install with: brew install tailscale (macOS) or curl -fsSL https://tailscale.com/install.sh | sh (Linux)"
+    fi
+}
+
+check_ai_assistant() {
+    print_info "Checking AI assistant..."
+    local assistant_cmd=$(get_ai_assistant_command)
+    local assistant_name=$(get_ai_assistant_display_name)
+
+    if ! command_exists "$assistant_cmd"; then
+        health_record "critical" "$assistant_name" "not found" "Run ./setup.sh to install"
+        return 1
+    fi
+
+    local version_output
+    if [ "$assistant_cmd" = "codex" ]; then
+        version_output=$($assistant_cmd --version 2>/dev/null | tail -1 || true || echo "installed")
+    else
+        version_output=$($assistant_cmd --version 2>/dev/null || echo "installed")
+    fi
+
+    case "${AI_ASSISTANT:-$DEFAULT_AI_ASSISTANT}" in
+        zai)
+            local settings_file="$HOME/.claude/settings.json"
+            if [ -f "$settings_file" ]; then
+                local base_url=$(grep -o '"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"[^"]*"' "$settings_file" | cut -d'"' -f4 2>/dev/null || echo "")
+                local has_token=$(grep -q '"ANTHROPIC_AUTH_TOKEN"' "$settings_file" && echo "yes" || echo "no")
+                if [ -n "$base_url" ] && [ "$has_token" = "yes" ]; then
+                    if command_exists curl; then
+                        local api_check=$(curl -s -o /dev/null -w "%{http_code}" "$base_url" 2>/dev/null || echo "000")
+                        if [ "$api_check" = "200" ] || [ "$api_check" = "401" ] || [ "$api_check" = "403" ]; then
+                            health_record "success" "$assistant_name" "$version_output (configured for Z.ai)"
+                        else
+                            health_record "warning" "$assistant_name" "$version_output (Z.ai API unreachable: HTTP $api_check)" "Check your Z.ai API key and network connection"
+                        fi
+                    else
+                        health_record "success" "$assistant_name" "$version_output (configured for Z.ai)"
+                    fi
+                else
+                    health_record "warning" "$assistant_name" "$version_output (not configured for Z.ai)" "Run ./setup.sh --use-zai to configure"
+                fi
+            else
+                health_record "warning" "$assistant_name" "$version_output (not configured)" "Run 'claude auth login' or ./setup.sh --use-zai"
+            fi
+            ;;
+        *)
+            health_record "success" "$assistant_name" "$version_output" "Run 'claude auth login' to authenticate if needed"
+            ;;
+    esac
+}
+
+check_mcp_servers() {
+    print_info "Checking MCP servers..."
+
+    if npx -y @z_ai/mcp-server --version >/dev/null 2>&1; then
+        local vision_version=$(npx -y @z_ai/mcp-server --version 2>/dev/null || echo "installed")
+        if command_exists claude; then
+            if claude mcp list 2>/dev/null | grep -q "zai-mcp-server"; then
+                local api_key="${Z_AI_API_KEY:-$ANTHROPIC_AUTH_TOKEN}"
+                if [ -n "$api_key" ]; then
+                    health_record "success" "Vision MCP Server" "$vision_version (configured)"
+                else
+                    health_record "warning" "Vision MCP Server" "$vision_version (no API key)" "Set Z_AI_API_KEY in your environment or Doppler"
+                fi
+            else
+                health_record "warning" "Vision MCP Server" "installed but not activated" "Run ./setup.sh --force-mcp to activate"
+            fi
+        else
+            health_record "warning" "Vision MCP Server" "available (requires Claude Code)" "Claude Code must be installed to use MCP servers"
+        fi
+    else
+        health_record "warning" "Vision MCP Server" "not available" "Requires Node.js and npx"
+    fi
+
+    if command_exists claude; then
+        if claude mcp list 2>/dev/null | grep -q "web-search-prime"; then
+            local api_key="${Z_AI_API_KEY:-$ANTHROPIC_AUTH_TOKEN}"
+            if [ -n "$api_key" ]; then
+                health_record "success" "Web Search MCP Server" "configured (HTTP endpoint)"
+            else
+                health_record "warning" "Web Search MCP Server" "configured but no API key" "Set Z_AI_API_KEY in your environment or Doppler"
+            fi
+        else
+            health_record "warning" "Web Search MCP Server" "not activated" "Run ./setup.sh --force-mcp to activate"
+        fi
+    else
+        health_record "warning" "Web Search MCP Server" "requires Claude Code" "Claude Code must be installed to use MCP servers"
+    fi
+}
+
+check_connectivity() {
+    print_info "Checking connectivity..."
+
+    if ! command_exists curl; then
+        health_record "warning" "Connectivity Check" "curl not available" "Install curl to check API connectivity"
+        return
+    fi
+
+    local github_status=$(curl -s -o /dev/null -w "%{http_code}" https://api.github.com 2>/dev/null || echo "000")
+    if [ "$github_status" = "200" ]; then
+        health_record "success" "GitHub API" "reachable (HTTP $github_status)"
+    else
+        health_record "warning" "GitHub API" "unreachable (HTTP $github_status)" "Check your network connection"
+    fi
+
+    local zai_url="${ANTHROPIC_BASE_URL:-https://api.z.ai/api/anthropic}"
+    local zai_status=$(curl -s -o /dev/null -w "%{http_code}" "$zai_url" 2>/dev/null || echo "000")
+    if [ "$zai_status" = "200" ] || [ "$zai_status" = "401" ] || [ "$zai_status" = "403" ]; then
+        health_record "success" "Z.ai API" "reachable (HTTP $zai_status)"
+    else
+        health_record "warning" "Z.ai API" "unreachable (HTTP $zai_status)" "Check your network connection and API endpoint"
+    fi
+
+    local doppler_status=$(curl -s -o /dev/null -w "%{http_code}" https://api.doppler.com 2>/dev/null || echo "000")
+    if [ "$doppler_status" = "200" ] || [ "$doppler_status" = "401" ]; then
+        health_record "success" "Doppler API" "reachable (HTTP $doppler_status)"
+    else
+        health_record "warning" "Doppler API" "unreachable (HTTP $doppler_status)" "Check your network connection"
+    fi
+}
+
+print_health_summary() {
+    local total_checks=$((HEALTH_SUCCESS_COUNT + HEALTH_WARNING_COUNT + HEALTH_CRITICAL_COUNT))
+
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}Health Check Summary${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  Total checks: ${total_checks}"
+    echo -e "  ${GREEN}✓${NC} Passed: ${HEALTH_SUCCESS_COUNT}"
+    echo -e "  ${YELLOW}⚠${NC} Warnings: ${HEALTH_WARNING_COUNT}"
+    echo -e "  ${RED}✗${NC} Critical: ${HEALTH_CRITICAL_COUNT}"
+    echo ""
+
+    if [ "$HEALTH_CRITICAL_COUNT" -gt 0 ]; then
+        echo -e "${RED}Overall: CRITICAL ISSUES DETECTED${NC}"
+        echo ""
+        print_error "AI assistant or critical tools are not working properly"
+    elif [ "$HEALTH_WARNING_COUNT" -gt 0 ]; then
+        echo -e "${YELLOW}Overall: DEGRADED${NC}"
+        echo ""
+        print_warning "Some services have warnings but core functionality is available"
+    else
+        echo -e "${GREEN}Overall: ALL SYSTEMS OPERATIONAL${NC}"
+        echo ""
+        print_success "All services are working correctly"
+    fi
+
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+}
+
+print_health_json() {
+    echo "{"
+    echo "  \"timestamp\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\","
+    echo "  \"summary\": {"
+    echo "    \"total\": $((HEALTH_SUCCESS_COUNT + HEALTH_WARNING_COUNT + HEALTH_CRITICAL_COUNT)),"
+    echo "    \"success\": $HEALTH_SUCCESS_COUNT,"
+    echo "    \"warning\": $HEALTH_WARNING_COUNT,"
+    echo "    \"critical\": $HEALTH_CRITICAL_COUNT"
+    echo "  },"
+    echo "  \"checks\": ["
+
+    local first=true
+    for result in "${HEALTH_RESULTS[@]}"; do
+        IFS='|' read -r status component message fix <<< "$result"
+
+        if [ "$first" = true ]; then
+            first=false
+        else
+            echo ","
+        fi
+
+        message=$(echo "$message" | sed 's/"/\\"/g')
+        fix=$(echo "$fix" | sed 's/"/\\"/g')
+
+        printf "    {\n"
+        printf "      \"status\": \"%s\",\n" "$status"
+        printf "      \"component\": \"%s\",\n" "$component"
+        printf "      \"message\": \"%s\"\n" "$message"
+
+        if [ -n "$fix" ]; then
+            printf "      ,\"suggested_fix\": \"%s\"\n" "$fix"
+        fi
+
+        printf "    }"
+    done
+
+    echo ""
+    echo "  ]"
+    echo "}"
+}
+
+check_health() {
+    HEALTH_CRITICAL_COUNT=0
+    HEALTH_WARNING_COUNT=0
+    HEALTH_SUCCESS_COUNT=0
+    HEALTH_RESULTS=()
+
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}Development Environment Health Check${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+
+    check_core_tools
+    check_ai_assistant
+    check_mcp_servers
+    check_connectivity
+
+    if [ "$HEALTH_JSON_OUTPUT" = true ]; then
+        print_health_json
+    else
+        print_health_summary
+    fi
+
+    if [ "$HEALTH_CRITICAL_COUNT" -gt 0 ]; then
+        return 1
+    elif [ "$HEALTH_WARNING_COUNT" -gt 0 ]; then
+        return 2
+    else
+        return 0
+    fi
+}
+
 main() {
     print_banner
     
@@ -1197,7 +1493,16 @@ main() {
     USER_SKIP_TOOLS=()
 
     while [[ $# -gt 0 ]]; do
-        case $1 in
+        case $1 in            --health)
+                check_health
+                exit $?
+                ;;
+            --health-json)
+                HEALTH_JSON_OUTPUT=true
+                check_health
+                exit $?
+                ;;
+
             --help|-h)
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
@@ -1216,6 +1521,8 @@ main() {
                 echo "  --skip-mcp        Skip all MCP server installation and activation"
                 echo "  --force-mcp       Force reinstallation of MCP servers even if already configured"
                 echo "  --list-envs       List available environments"
+            echo "  --health          Run health check on all installed tools"
+            echo "  --health-json     Run health check and output JSON format"
                 echo "  --help, -h        Show this help message"
                 exit 0
                 ;;
