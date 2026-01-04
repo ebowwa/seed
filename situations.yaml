@@ -54,6 +54,7 @@ environments:
       - os: "darwin"  # macOS
       - hostname_pattern: ".*"
     tools:
+      - orbstack     # Fast Docker & Linux VMs for macOS
       - tailscale
       - github-cli
       - doppler       # For managing local secrets
@@ -166,6 +167,16 @@ tools:
     post_install:
       - "configure_web_search_mcp"
     config_env: "Z_AI_API_KEY"
+
+  orbstack:
+    name: "OrbStack"
+    description: "Fast, lightweight Docker and Linux VM manager for macOS - drop-in Docker Desktop replacement"
+    check_command: "orb"
+    install_methods:
+      macos: "brew install --cask orbstack"
+    post_install:
+      - "start_orbstack"
+    config_env: null
 
 # Additional setup functions that can be called
 additional_functions:
