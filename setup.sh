@@ -302,7 +302,7 @@ get_environment_tools() {
             ;;
         local_dev|default)
             # Local dev and default get everything including Vision MCP and Search MCP
-            TOOLS_TO_INSTALL=("tailscale" "github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp")
+            TOOLS_TO_INSTALL=("orbstack" "tailscale" "github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp")
             SKIP_TOOLS=()
             ;;
     esac
@@ -944,6 +944,93 @@ install_web_search_mcp() {
 
     print_success "Web Search MCP Server configuration complete"
     print_info "Usage: Remote HTTP service - no local installation required"
+}
+
+# ============================================================================
+# OrbStack Installation
+# ============================================================================
+
+# Install OrbStack - Fast, lightweight Docker and Linux VM manager for macOS
+# Drop-in Docker Desktop replacement with 2x better performance and lower resource usage
+# Supports Docker containers and Linux virtual machines with excellent macOS integration
+install_orbstack() {
+    # Skip if not needed for this environment
+    if ! should_install_tool "orbstack"; then
+        print_info "Skipping OrbStack installation (not needed for $DETECTED_ENV)"
+        return
+    fi
+
+    # OrbStack is macOS only
+    if [[ "$OS" != "macos" ]]; then
+        print_info "OrbStack is macOS only - skipping on $OS"
+        return
+    fi
+
+    print_info "Installing OrbStack..."
+
+    # Check if OrbStack is already installed
+    if command_exists orb; then
+        local version=$(orb --version 2>/dev/null || echo "installed")
+        print_success "OrbStack already installed: $version"
+
+        # Check if OrbStack is running
+        if pgrep -x "OrbStack" >/dev/null 2>&1; then
+            print_success "OrbStack is running"
+        else
+            print_info "Starting OrbStack..."
+            open -a OrbStack
+            sleep 2
+        fi
+    else
+        # Install OrbStack via Homebrew
+        if command_exists brew; then
+            print_info "Installing OrbStack via Homebrew..."
+            brew install --cask orbstack
+
+            # Start OrbStack
+            print_info "Starting OrbStack..."
+            open -a OrbStack
+
+            # Wait for OrbStack to be ready
+            print_info "Waiting for OrbStack to initialize..."
+            local max_wait=30
+            local waited=0
+            while ! command_exists orb && [ $waited -lt $max_wait ]; do
+                sleep 1
+                waited=$((waited + 1))
+            done
+
+            if command_exists orb; then
+                print_success "OrbStack installed and ready"
+            else
+                print_warning "OrbStack installed but CLI not yet available"
+                print_info "You may need to restart your terminal or run: eval \"\$(orb shell)\""
+            fi
+        else
+            print_error "Homebrew not found - required for OrbStack installation"
+            print_info "Install Homebrew first: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            return 1
+        fi
+    fi
+
+    # Show OrbStack status
+    if command_exists orb; then
+        print_info ""
+        print_success "OrbStack Installation Complete"
+        print_info "Useful OrbStack commands:"
+        print_info "  orb list              - List machines and containers"
+        print_info "  orb create ubuntu     - Create a Linux VM"
+        print_info "  orb shell <name>      - SSH into a machine"
+        print_info "  orb exec <name> -- cmd - Run command in machine"
+        print_info ""
+        print_info "Docker is now available via OrbStack:"
+        print_info "  docker ps             - List containers"
+        print_info "  docker run ubuntu     - Run a container"
+        print_info ""
+        print_info "Learn more: https://orbstack.dev/docs"
+    fi
+
+    print_success "OrbStack installation complete"
 }
 
 # ============================================================================
@@ -1596,6 +1683,9 @@ main() {
             tailscale)
                 echo -e "${BLUE}Step $current_step/$total_steps: Tailscale VPN${NC}"
                 ;;
+            orbstack)
+                echo -e "${BLUE}Step $current_step/$total_steps: OrbStack${NC}"
+                ;;
         esac
         echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
@@ -1607,6 +1697,7 @@ main() {
             vision-mcp-server) install_vision_mcp ;;
             web-search-mcp) install_web_search_mcp ;;
             tailscale) install_tailscale ;;
+            orbstack) install_orbstack ;;
         esac
         
         ((current_step++))

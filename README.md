@@ -38,6 +38,7 @@ cd seed
 | **GitHub CLI** | GitHub from terminal |
 | **Doppler** | Secrets management |
 | **Tailscale** | Zero-config VPN |
+| **OrbStack** | Fast Docker & Linux VMs (macOS) |
 | **Vision MCP** | Image/video analysis (Z.ai) |
 | **Web Search MCP** | Real-time web search (Z.ai) |
 | **GitHub MCP** | Repository intelligence |
