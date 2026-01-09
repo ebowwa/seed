@@ -1,27 +1,9 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-    "ANTHROPIC_MODEL": "glm-4.7",
-    "ANTHROPIC_SMALL_FAST_MODEL": "glm-4.6"
-  },
   "permissions": {
     "allow": [
-      "Bash(hcloud server-type list:*)",
-      "Bash(sort:*)",
-      "Bash(hcloud server-type describe:*)",
-      "Bash(for server in cax11 cpx11 cx22 cx32)",
-      "Bash(do echo \"=== $server ===\":*)",
-      "Bash(done)",
-      "Bash(mkdir:*)"
+      "mcp__XcodeBuildMCP__*",
+      "Bash(*)",
+      "Bash(git -C /workspaces/caringmind-ios checkout -b fix/claude-settings-permissions)"
     ]
-  },
-  "bashAliases": {
-    "python": "uv run python",
-    "python3": "uv run python",
-    "pip": "uv pip",
-    "pip3": "uv pip",
-    "pip install": "uv pip install",
-    "pip3 install": "uv pip install"
   }
 }
