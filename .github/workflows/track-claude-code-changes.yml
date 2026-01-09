@@ -63,16 +63,17 @@ jobs:
         if: steps.check-version.outputs.version_changed == 'true' || hashFiles('docs/claude-code-tracked-versions.md') == ''
         run: |
           LAST_TRACKED=$(cat /tmp/last-tracked.txt)
+          LATEST_VERSION="${{ steps.fetch-changelog.outputs.latest_version }}"
+          TODAY=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
 
-          # Create new entries document
-          OUTPUT_FILE="docs/claude-code-new-changes.md"
+          # Create temp file for new content
+          TEMP_FILE="/tmp/new-changes-section.md"
 
-          echo "# Claude Code - New Changes" > "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "*Last checked: $(date -u +"%Y-%m-%d %H:%M:%S UTC")*" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
-          echo "## Version ${{ steps.fetch-changelog.outputs.latest_version }}" >> "$OUTPUT_FILE"
-          echo "" >> "$OUTPUT_FILE"
+          echo "" >> "$TEMP_FILE"
+          echo "---" >> "$TEMP_FILE"
+          echo "" >> "$TEMP_FILE"
+          echo "## $LATEST_VERSION - $TODAY" >> "$TEMP_FILE"
+          echo "" >> "$TEMP_FILE"
 
           # Extract changelog content until we hit the last tracked version (or end of file)
           if [ -n "$LAST_TRACKED" ]; then
@@ -80,13 +81,26 @@ jobs:
               /^## $LAST_TRACKED/ { exit }
               /^## / && !started { started=1; next }
               started { print }
-            " /tmp/full-changelog.md >> "$OUTPUT_FILE"
+            " /tmp/full-changelog.md >> "$TEMP_FILE"
           else
             # First time tracking, get everything
-            awk '/^## / { if (content) exit; content=1; next } content { print }' /tmp/full-changelog.md >> "$OUTPUT_FILE"
+            awk '/^## / { if (content) exit; content=1; next } content { print }' /tmp/full-changelog.md >> "$TEMP_FILE"
           fi
 
-          echo "Extracted new changes to $OUTPUT_FILE"
+          # Append to index file (create if doesn't exist)
+          INDEX_FILE="docs/claude-code-changelog-index.md"
+          if [ ! -f "$INDEX_FILE" ]; then
+            echo "# Claude Code Changelog Index" > "$INDEX_FILE"
+            echo "" >> "$INDEX_FILE"
+            echo "*This index tracks all Claude Code versions monitored by this repository.*" >> "$INDEX_FILE"
+            echo "" >> "$INDEX_FILE"
+          fi
+
+          # Prepend new content to index file (newest first)
+          cat "$TEMP_FILE" "$INDEX_FILE" > "$INDEX_FILE.tmp"
+          mv "$INDEX_FILE.tmp" "$INDEX_FILE"
+
+          echo "Appended new changes to $INDEX_FILE"
 
       - name: Update tracked versions
         run: |
@@ -108,7 +122,7 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          git add docs/claude-code-tracked-versions.md docs/claude-code-new-changes.md 2>/dev/null || true
+          git add docs/claude-code-tracked-versions.md docs/claude-code-changelog-index.md 2>/dev/null || true
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
