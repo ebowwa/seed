@@ -1,6 +1,15 @@
 
 ---
 
+## 2.1.4 - 2026-01-11 18:10:13 UTC
+
+
+- Added `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` environment variable to disable all background task functionality including auto-backgrounding and the Ctrl+B shortcut
+- Fixed "Help improve Claude" setting fetch to refresh OAuth and retry when it fails due to a stale OAuth token
+
+
+---
+
 ## 2.1.3 - 2026-01-10 18:10:09 UTC
 
 
