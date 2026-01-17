@@ -76,9 +76,11 @@ async function handleRequest(req: Request): Promise<Response> {
       const worktrees = await gitService.listWorktrees();
       const ralphLoops = await ralphService.listRalphLoops();
 
+      const hostname = await getHostname();
+
       const status: NodeStatus = {
-        node_id: process.env.HOSTNAME || "unknown",
-        hostname: process.env.HOSTNAME || "unknown",
+        node_id: hostname,
+        hostname,
         tailscale_ip: getTailscaleIP(),
         capacity: await getCapacity(),
         worktrees,
@@ -244,6 +246,19 @@ async function handleRequest(req: Request): Promise<Response> {
 // ============================================================================
 // Utility Functions
 // ============================================================================
+
+async function getHostname(): Promise<string> {
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    const { stdout } = await execAsync("hostname");
+    return stdout.trim() || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 
 async function getCapacity() {
   try {
