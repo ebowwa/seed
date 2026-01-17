@@ -83,6 +83,7 @@ async function handleRequest(req: Request): Promise<Response> {
         hostname,
         tailscale_ip: getTailscaleIP(),
         capacity: await getCapacity(),
+        sessions: await getSessions(),
         worktrees,
         ralph_loops: ralphLoops,
       };
@@ -278,16 +279,40 @@ async function getCapacity() {
     const { stdout: diskInfo } = await execAsync("df -h / | tail -1 | awk '{print $5}' | sed 's/%//'");
     const diskUsage = parseInt(diskInfo) || 0;
 
+    // Get process count
+    const { stdout: procCount } = await execAsync("ps -e | wc -l");
+    const processes = parseInt(procCount.trim()) || 0;
+
+    // Get load average (works on both Linux and macOS)
+    let loadAverage: number[] = [0, 0, 0];
+    try {
+      const { stdout: loadAvg } = await execAsync("uptime | awk -F'load averages?:' '{print $2}'");
+      const loadStr = loadAvg.trim();
+      // Parse load averages like "0.50, 0.80, 0.70" or "0.50 0.80 0.70"
+      const loads = loadStr.replace(/,/g, ' ').split(/\s+/).filter((v: string) => v.length > 0);
+      loadAverage = loads.slice(0, 3).map((v: string) => parseFloat(v) || 0);
+      // Fill missing values if fewer than 3
+      while (loadAverage.length < 3) {
+        loadAverage.push(loadAverage[loadAverage.length - 1] || 0);
+      }
+    } catch {
+      loadAverage = [0, 0, 0];
+    }
+
     return {
       cpu_percent: Math.round(cpuUsage),
       memory_percent: Math.round(memUsage),
       disk_percent: diskUsage,
+      processes,
+      load_average: loadAverage,
     };
   } catch {
     return {
       cpu_percent: 0,
       memory_percent: 0,
       disk_percent: 0,
+      processes: 0,
+      load_average: [0, 0, 0],
     };
   }
 }
@@ -302,6 +327,55 @@ function getTailscaleIP(): string {
     return ip || "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+async function getSessions() {
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    // Count SSH sessions (logged in users)
+    let ssh = 0;
+    try {
+      const { stdout: sshOutput } = await execAsync("who 2>/dev/null | wc -l");
+      ssh = parseInt(sshOutput.trim()) || 0;
+    } catch {
+      ssh = 0;
+    }
+
+    // Count tmux sessions
+    let tmux = 0;
+    try {
+      const { stdout: tmuxOutput } = await execAsync("tmux list-sessions 2>/dev/null | wc -l");
+      tmux = parseInt(tmuxOutput.trim()) || 0;
+    } catch {
+      tmux = 0;
+    }
+
+    // Count Claude Code processes
+    let claudeCode = 0;
+    try {
+      const { stdout: claudeOutput } = await execAsync("ps aux | grep -c '[c]laude' || echo 0");
+      claudeCode = parseInt(claudeOutput.trim()) || 0;
+    } catch {
+      claudeCode = 0;
+    }
+
+    return {
+      ssh,
+      tmux,
+      claude_code: claudeCode,
+      total: ssh + tmux + claudeCode,
+    };
+  } catch {
+    return {
+      ssh: 0,
+      tmux: 0,
+      claude_code: 0,
+      total: 0,
+    };
   }
 }
 

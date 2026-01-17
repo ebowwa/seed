@@ -62,6 +62,7 @@ export interface NodeStatus {
   hostname: string;
   tailscale_ip: string;
   capacity: Capacity;
+  sessions: Sessions;
   worktrees: Worktree[];
   ralph_loops: RalphLoop[];
 }
@@ -70,6 +71,15 @@ export interface Capacity {
   cpu_percent: number;
   memory_percent: number;
   disk_percent: number;
+  processes: number;
+  load_average: number[];
+}
+
+export interface Sessions {
+  ssh: number;
+  tmux: number;
+  claude_code: number;
+  total: number;
 }
 
 // ============================================================================
