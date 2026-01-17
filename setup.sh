@@ -276,18 +276,18 @@ get_environment_tools() {
     assistant_tool=$(get_ai_assistant_tool_id)
     
     # Start with default tool set (all tools)
-    TOOLS_TO_INSTALL=("tailscale" "github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp")
+    TOOLS_TO_INSTALL=("tailscale" "github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp" "bun")
     
     # Override tool selection based on specific environment needs
     case "$env" in
         vps)
             # VPS needs all tools including Claude, Vision MCP, and Search MCP for remote development
-            TOOLS_TO_INSTALL=("tailscale" "github-cli" "doppler" "${assistant_tool}" "vision-mcp-server" "web-search-mcp")
+            TOOLS_TO_INSTALL=("tailscale" "github-cli" "doppler" "${assistant_tool}" "vision-mcp-server" "web-search-mcp" "bun")
             SKIP_TOOLS=()
             ;;
         codespaces)
             # Codespaces doesn't need Tailscale but gets Vision MCP and Search MCP
-            TOOLS_TO_INSTALL=("github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp")
+            TOOLS_TO_INSTALL=("github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp" "bun")
             SKIP_TOOLS=("tailscale")
             ;;
         ci_cd)
@@ -302,7 +302,7 @@ get_environment_tools() {
             ;;
         local_dev|default)
             # Local dev and default get everything including Vision MCP and Search MCP
-            TOOLS_TO_INSTALL=("orbstack" "tailscale" "github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp")
+            TOOLS_TO_INSTALL=("orbstack" "tailscale" "github-cli" "${assistant_tool}" "doppler" "vision-mcp-server" "web-search-mcp" "bun")
             SKIP_TOOLS=()
             ;;
     esac
@@ -1031,6 +1031,57 @@ install_orbstack() {
     fi
 
     print_success "OrbStack installation complete"
+}
+
+# Install Bun - Fast JavaScript runtime, package manager, and test runner
+# Optimized for speed, with built-in support for TypeScript and JSX
+# Required for Node Agent and other modern JavaScript/TypeScript tools
+install_bun() {
+    # Skip if not needed for this environment
+    if ! should_install_tool "bun"; then
+        print_info "Skipping Bun installation (not needed for $DETECTED_ENV)"
+        return
+    fi
+
+    print_info "Installing Bun..."
+
+    if command_exists bun; then
+        local version=$(bun --version 2>/dev/null || echo "installed")
+        print_success "Bun already installed: $version"
+    else
+        case "$OS" in
+            macos)
+                # Trust the official Bun installer script for macOS
+                curl -fsSL https://bun.sh/install | bash
+                # Add bun to PATH for current session
+                export BUN_INSTALL="$HOME/.bun"
+                export PATH="$BUN_INSTALL/bin:$PATH"
+                ;;
+            debian|redhat)
+                # Trust the official Bun installer script for Linux
+                # Note: requires 'unzip' package (installed by base system setup)
+                curl -fsSL https://bun.sh/install | bash
+                # Add bun to PATH for current session
+                export BUN_INSTALL="$HOME/.bun"
+                export PATH="$BUN_INSTALL/bin:$PATH"
+                ;;
+            *)
+                print_warning "Bun installation not automated for this OS"
+                print_info "Please visit: https://bun.sh/docs/installation"
+                return
+                ;;
+        esac
+
+        # Verify installation
+        if command_exists bun; then
+            print_success "Bun installed: $(bun --version)"
+        else
+            print_error "Bun installation failed"
+            return 1
+        fi
+    fi
+
+    print_success "Bun installation complete"
 }
 
 # ============================================================================
@@ -1993,6 +2044,9 @@ main() {
             orbstack)
                 echo -e "${BLUE}Step $current_step/$total_steps: OrbStack${NC}"
                 ;;
+            bun)
+                echo -e "${BLUE}Step $current_step/$total_steps: Bun${NC}"
+                ;;
         esac
         echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
@@ -2005,6 +2059,7 @@ main() {
             web-search-mcp) install_web_search_mcp ;;
             tailscale) install_tailscale ;;
             orbstack) install_orbstack ;;
+            bun) install_bun ;;
         esac
         
         ((current_step++))
