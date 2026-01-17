@@ -63,6 +63,7 @@ export interface NodeStatus {
   tailscale_ip: string;
   capacity: Capacity;
   sessions: Sessions;
+  ports: PortInfo[];
   worktrees: Worktree[];
   ralph_loops: RalphLoop[];
 }
@@ -80,6 +81,14 @@ export interface Sessions {
   tmux: number;
   claude_code: number;
   total: number;
+}
+
+export interface PortInfo {
+  port: number;
+  protocol: "tcp" | "udp";
+  state: "listening" | "established";
+  process?: string;
+  pid?: number;
 }
 
 // ============================================================================

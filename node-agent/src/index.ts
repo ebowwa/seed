@@ -84,6 +84,7 @@ async function handleRequest(req: Request): Promise<Response> {
         tailscale_ip: getTailscaleIP(),
         capacity: await getCapacity(),
         sessions: await getSessions(),
+        ports: await getActivePorts(),
         worktrees,
         ralph_loops: ralphLoops,
       };
@@ -376,6 +377,113 @@ async function getSessions() {
       claude_code: 0,
       total: 0,
     };
+  }
+}
+
+async function getActivePorts() {
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    // Get listening TCP ports on Linux and macOS
+    // Linux: ss -tlnp | grep LISTEN
+    // macOS: lsof -i -P -n | grep LISTEN
+    let ports: PortInfo[] = [];
+
+    try {
+      const isMac = process.platform === "darwin";
+      let command = "";
+
+      if (isMac) {
+        // macOS: use lsof (format: PROCESS_NAME PID USER ... TCP ADDRESS:PORT)
+        // awk extracts: PORT ($9), PROCESS_NAME ($1), PID ($2)
+        command = "lsof -i -P -n 2>/dev/null | grep LISTEN | awk '{print $9, $1, $2}'";
+      } else {
+        // Linux: use ss (faster than netstat)
+        command = "ss -tlnp 2>/dev/null | grep LISTEN | awk '{print $4, $5, $7}'";
+      }
+
+      const { stdout: portOutput } = await execAsync(command);
+      const lines = portOutput.trim().split("\n").filter((l: string) => l.length > 0);
+
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+
+        if (isMac) {
+          // lsof format: PORT PROCESS PID
+          // e.g., "*:8911" "bun" "12345" or "[::1]:5432" "postgres" "1324"
+          // Match port after ] for IPv6, or at end for IPv4
+          const portMatch = parts[0]?.match(/]:(\d+)|:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1] || portMatch[2]);
+            const process = parts[1] || "unknown";
+            const pidMatch = parts[2]?.match(/^(\d+)/);
+            const pid = pidMatch ? parseInt(pidMatch[1]) : undefined;
+
+            ports.push({
+              port,
+              protocol: "tcp",
+              state: "listening",
+              process,
+              pid
+            });
+          }
+        } else {
+          // ss format: ADDR PROCESS INFO
+          // e.g., "*:8911" "bun" "pid=12345" or "[::]:5432" "postgres" "pid=1324"
+          const portMatch = parts[0]?.match(/]:(\d+)|:(\d+)$/);
+          if (portMatch) {
+            const port = parseInt(portMatch[1] || portMatch[2]);
+            const process = parts[1] || "unknown";
+            const pidMatch = parts[2]?.match(/pid=(\d+)/);
+            const pid = pidMatch ? parseInt(pidMatch[1]) : undefined;
+
+            ports.push({
+              port,
+              protocol: "tcp",
+              state: "listening",
+              process,
+              pid
+            });
+          }
+        }
+      }
+    } catch {
+      // Fall back to netstat if ss/lsof fails
+      try {
+        const { stdout: netOutput } = await execAsync("netstat -an 2>/dev/null | grep LISTEN | grep -E ':(80|443|8000|8080|8443|8911|9000|3000|5000|4000|7000)'");
+        const lines = netOutput.trim().split("\n").filter((l: string) => l.length > 0);
+
+        for (const line of lines) {
+          // netstat format varies, but typically: proto addr state
+          const parts = line.trim().split(/\s+/);
+          const addr = parts[3] || "";
+          const portMatch = addr.match(/\.(\d+)\./);
+
+          if (portMatch) {
+            const port = parseInt(portMatch[1]);
+            if (port > 0 && !ports.find(p => p.port === port)) {
+              ports.push({
+                port,
+                protocol: addr.includes(".") ? "tcp" : "udp",
+                state: "listening"
+              });
+            }
+          }
+        }
+      } catch {
+        // If all else fails, return empty array
+        ports = [];
+      }
+    }
+
+    // Sort by port number
+    ports.sort((a, b) => a.port - b.port);
+
+    return ports;
+  } catch {
+    return [];
   }
 }
 
