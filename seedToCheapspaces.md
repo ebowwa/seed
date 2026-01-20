@@ -9,7 +9,17 @@ cd seed && bash ./setup.sh
 
 doppler login, copy code, direct user to link
 git auth login, copy code, direct user to link
-// TODO from seed root allow running node-agent
+tailscale up 
+/**
+root@cheapspacesDEV:~# tailscale up                                             
+                                                                                
+To authenticate, visit:                                                         
+                                                                                
+        https://login.tailscale.com/a/16e8c8b9018160                            
+
+Success.                                             **/
+
+// TODO from seed /root allow running node-agent
 /** TODO config machines 
 ~/.tmux.conf:                                                          
   # Change prefix to Ctrl+a (easier)                                            
