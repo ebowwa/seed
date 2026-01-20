@@ -105,5 +105,74 @@ export class NodeAgentTool extends BaseTool {
     await this.exec(["chmod", "+x", binPath]);
 
     console.log(`  ✓ ${this.name} installed to ${binPath}`);
+
+    // Run node-agent after installation
+    console.log(`  → Starting ${this.name}...`);
+
+    if (env.type === "vps" || env.type === "container") {
+      // On VPS/container, use systemd if available
+      const serviceFile = `${agentPath}/systemd/node-agent.service`;
+      const { exitCode: serviceExists } = await this.exec(["test", "-f", serviceFile]);
+
+      if (serviceExists === 0) {
+        // Set up systemd service
+        const systemdDir = "/etc/systemd/system";
+        const serviceUser = env.isRoot ? "root" : process.env.USER || "root";
+
+        // Copy and configure service file
+        await this.exec([
+          "sudo", "cp", serviceFile, `${systemdDir}/node-agent.service`
+        ]);
+        await this.exec([
+          "sudo", "sed", "-i", `s/User=ubuntu/User=${serviceUser}/g`,
+          `${systemdDir}/node-agent.service`
+        ]);
+        await this.exec([
+          "sudo", "sed", "-i", `s|/home/ubuntu/|/home/${serviceUser}/|g`,
+          `${systemdDir}/node-agent.service`
+        ]);
+
+        // Create required directories
+        const basePath = env.isRoot ? "/root" : `/home/${serviceUser}`;
+        await this.exec(["sudo", "mkdir", "-p", `${basePath}/repos`]);
+        await this.exec(["sudo", "mkdir", "-p", `${basePath}/.node-agent/pids`]);
+        await this.exec(["sudo", "mkdir", "-p", `${basePath}/.node-agent/logs`]);
+
+        // Set ownership
+        if (!env.isRoot) {
+          await this.exec(["sudo", "chown", "-R", `${serviceUser}:${serviceUser}`, basePath]);
+        }
+
+        // Reload and start service
+        await this.exec(["sudo", "systemctl", "daemon-reload"]);
+        await this.exec(["sudo", "systemctl", "enable", "node-agent.service"]);
+        await this.exec(["sudo", "systemctl", "start", "node-agent.service"]);
+
+        console.log(`  ✓ ${this.name} running as systemd service`);
+      } else {
+        // No systemd service file, run directly
+        await this.runDirectly(agentPath);
+      }
+    } else {
+      // Local dev - run in background
+      await this.runDirectly(agentPath);
+    }
+  }
+
+  private async runDirectly(agentPath: string): Promise<void> {
+    // Run node-agent in background using bun
+    const proc = Bun.spawn(
+      ["bun", "run", "src/index.ts"],
+      {
+        cwd: agentPath,
+        stdout: "inherit",
+        stderr: "inherit",
+        detached: true,
+      }
+    );
+
+    // Don't wait for it - it runs in background
+    proc.unref();
+    console.log(`  ✓ ${this.name} started in background`);
   }
 }
