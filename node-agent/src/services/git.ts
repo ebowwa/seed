@@ -37,28 +37,49 @@ export class GitService {
       const { stdout } = await execAsync(`git worktree list --porcelain`, { cwd: repoPath });
       const worktrees: Worktree[] = [];
 
-      for (const line of stdout.trim().split("\n")) {
-        if (!line) continue;
+      const lines = stdout.trim().split("\n");
+      let currentWorktree: Partial<Worktree> | null = null;
+
+      for (const line of lines) {
+        if (!line) {
+          // Empty line marks end of a worktree entry
+          if (currentWorktree && currentWorktree.path) {
+            worktrees.push(currentWorktree as Worktree);
+          }
+          currentWorktree = null;
+          continue;
+        }
 
         const parts = line.split(" ");
-        const worktreePath = parts[0];
-        const commit = parts[1];
-        const branch = parts[2]?.replace("refs/heads/", "") || "detached";
+        const key = parts[0];
+        const value = parts.slice(1).join(" ");
 
-        // Extract worktree ID from path
-        const id = worktreePath.split("/").pop() || path.basename(worktreePath);
+        if (key === "worktree") {
+          currentWorktree = {
+            path: value,
+            status: "ready",
+          };
+        } else if (key === "HEAD") {
+          if (currentWorktree) {
+            currentWorktree.commit = value;
+          }
+        } else if (key === "branch") {
+          if (currentWorktree) {
+            currentWorktree.branch = value.replace("refs/heads/", "") || "detached";
+          }
+        }
+      }
 
-        // Get stats
-        const stats = await fsp.stat(worktreePath).catch(() => null);
+      // Don't forget the last worktree if file doesn't end with empty line
+      if (currentWorktree && currentWorktree.path) {
+        worktrees.push(currentWorktree as Worktree);
+      }
 
-        worktrees.push({
-          id,
-          branch,
-          commit,
-          path: worktreePath,
-          created_at: stats?.mtime.toISOString() || new Date().toISOString(),
-          status: "ready",
-        });
+      // Set IDs and get stats for each worktree
+      for (const worktree of worktrees) {
+        worktree.id = worktree.path.split("/").pop() || path.basename(worktree.path);
+        const stats = await fsp.stat(worktree.path).catch(() => null);
+        worktree.created_at = stats?.mtime.toISOString() || new Date().toISOString();
       }
 
       return worktrees;
