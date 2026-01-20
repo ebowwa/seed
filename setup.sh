@@ -48,7 +48,7 @@ install_bun() {
     esac
 
     # Download and install Bun
-    local bun_url="https://bun.sh/install/install.sh"
+    local bun_url="https://bun.sh/install"
 
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL "${bun_url}" | bash
