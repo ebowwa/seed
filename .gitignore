@@ -27,8 +27,11 @@ tmp/
 *.bak
 *.backup
 
-# Node (if using any Node tools)
+# Node/Bun
 node_modules/
+bun.lock
+bun.lockb
+
 
 # Python
 __pycache__/
