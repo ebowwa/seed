@@ -10,6 +10,7 @@ cd seed && bash ./setup.sh
 doppler login, copy code, direct user to link
 git auth login, copy code, direct user to link
 tailscale up 
+gh auth login
 /**
 root@cheapspacesDEV:~# tailscale up                                             
                                                                                 
@@ -17,7 +18,17 @@ To authenticate, visit:
                                                                                 
         https://login.tailscale.com/a/16e8c8b9018160                            
 
-Success.                                             **/
+Success.  
+
+root@cheapspacesDEV:~# gh auth login
+? Where do you use GitHub? GitHub.com
+? What is your preferred protocol for Git operations on this host? HTTPS
+? Authenticate Git with your GitHub credentials? Yes
+? How would you like to authenticate GitHub CLI? Login with a web browser
+
+! First copy your one-time code: CE34-876C
+Press Enter to open https://github.com/login/device in your browser... 
+**/
 
 // TODO from seed /root allow running node-agent
 /** TODO config machines 
