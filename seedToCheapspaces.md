@@ -1,6 +1,10 @@
 // TODO: Get VPS node support fully integrated, Os for the nodes
 
 git clone this repo & branch
+/** TODO: seed doesnt install `bun` yet..
+- unzip is required to install bun `apt-get update && apt-get install -y unzip && curl -fsSL                     
+   https://bun.sh/install | bash `
+**/
 cd seed && bash ./setup.sh
 
 doppler login, copy code, direct user to link
