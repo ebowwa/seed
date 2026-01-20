@@ -1,0 +1,128 @@
+/**
+ * Base Tool Class
+ * Abstract base for tool installers
+ */
+
+import type { Environment } from "../env/detect.js";
+import type { Tool } from "./registry.js";
+
+export interface ToolContext {
+  env: Environment;
+  binDir: string;
+  homeDir: string;
+  configDir: string;
+  cacheDir: string;
+}
+
+export abstract class BaseTool implements Tool {
+  abstract name: string;
+  abstract description: string;
+
+  protected installed: boolean = false;
+
+  /**
+   * Check if tool should be installed for this environment
+   */
+  abstract isApplicable(env: Environment): boolean | Promise<boolean>;
+
+  /**
+   * Install the tool
+   */
+  abstract install(env: Environment): Promise<void>;
+
+  /**
+   * Check if tool is already installed
+   */
+  abstract checkInstalled(env: Environment): boolean | Promise<boolean>;
+
+  /**
+   * Execute a shell command
+   */
+  protected async exec(
+    command: string[],
+    options: { cwd?: string; env?: Record<string, string> } = {}
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const proc = Bun.spawn(command, {
+      stdout: "pipe",
+      stderr: "pipe",
+      cwd: options.cwd,
+      env: { ...process.env, ...options.env },
+    });
+
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+
+    return { stdout, stderr, exitCode };
+  }
+
+  /**
+   * Download a file to a specific path
+   */
+  protected async download(url: string, dest: string): Promise<void> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download ${url}: ${response.statusText}`);
+    }
+
+    const buffer = await response.arrayBuffer();
+    await Bun.write(dest, buffer);
+  }
+
+  /**
+   * Ensure a directory exists
+   */
+  protected async ensureDir(path: string): Promise<void> {
+    try {
+      await Bun.mkdir(path, { recursive: true });
+    } catch (err) {
+      // Ignore if already exists
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw err;
+      }
+    }
+  }
+
+  /**
+   * Check if a command exists in PATH
+   */
+  protected async commandExists(cmd: string): Promise<boolean> {
+    try {
+      const proc = Bun.spawn(["which", cmd], {
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const exitCode = await proc.exited;
+      return exitCode === 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Make a file executable
+   */
+  protected async chmod(path: string, mode: string): Promise<void> {
+    const proc = Bun.spawn(["chmod", mode, path], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) {
+      throw new Error(`Failed to chmod ${path}`);
+    }
+  }
+
+  /**
+   * Get the context for this tool
+   */
+  protected getContext(env: Environment): ToolContext {
+    return {
+      env,
+      binDir: env.binDir,
+      homeDir: env.homeDir,
+      configDir: env.configDir,
+      cacheDir: env.cacheDir,
+    };
+  }
+}

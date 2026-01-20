@@ -45,4 +45,4 @@ env/
 *.key
 *.pem
 *.cert
-doppler.env
+doppler.envv2/seed-setup
