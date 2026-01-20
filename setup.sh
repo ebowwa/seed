@@ -281,8 +281,8 @@ get_environment_tools() {
     # Override tool selection based on specific environment needs
     case "$env" in
         vps)
-            # VPS needs all tools including Claude, Vision MCP, and Search MCP for remote development
-            TOOLS_TO_INSTALL=("tailscale" "github-cli" "doppler" "${assistant_tool}" "vision-mcp-server" "web-search-mcp")
+            # VPS needs all tools including Claude, Vision MCP, Search MCP, and Node Agent for orchestration
+            TOOLS_TO_INSTALL=("tailscale" "github-cli" "doppler" "${assistant_tool}" "vision-mcp-server" "web-search-mcp" "node-agent")
             SKIP_TOOLS=()
             ;;
         codespaces)
@@ -944,6 +944,113 @@ install_web_search_mcp() {
 
     print_success "Web Search MCP Server configuration complete"
     print_info "Usage: Remote HTTP service - no local installation required"
+}
+
+# ============================================================================
+# Node Agent Installation
+# ============================================================================
+
+# Install Node Agent - Ralph Loop Orchestration API Server
+# Provides HTTP API for managing git worktrees and autonomous Ralph loops
+# Runs as systemd service for persistent operation
+install_node_agent() {
+    # Skip if not needed for this environment
+    if ! should_install_tool "node-agent"; then
+        print_info "Skipping Node Agent installation (not needed for $DETECTED_ENV)"
+        return
+    fi
+
+    # Only install on VPS nodes (not needed for local/codespaces)
+    if [[ "$DETECTED_ENV" != "vps" ]]; then
+        print_info "Skipping Node Agent installation (only needed on VPS nodes)"
+        return
+    fi
+
+    print_info "Installing Node Agent..."
+
+    local node_agent_dir="${SCRIPT_DIR}/node-agent"
+    local systemd_dir="/etc/systemd/system"
+
+    # Check if Node Agent directory exists
+    if [[ ! -d "$node_agent_dir" ]]; then
+        print_error "Node Agent directory not found at $node_agent_dir"
+        print_info "Expected structure: seed/node-agent/"
+        return 1
+    fi
+
+    # Create .env file if it doesn't exist
+    if [[ ! -f "$node_agent_dir/.env" ]]; then
+        if [[ -f "$node_agent_dir/.env.example" ]]; then
+            cp "$node_agent_dir/.env.example" "$node_agent_dir/.env"
+            print_success "Created .env from .env.example"
+        fi
+    fi
+
+    # Install dependencies
+    print_info "Installing Node Agent dependencies..."
+    cd "$node_agent_dir"
+    if command -v bun &> /dev/null; then
+        bun install 2>/dev/null || true
+    fi
+
+    # Create systemd service
+    print_info "Creating systemd service..."
+    local service_file="${node_agent_dir}/systemd/node-agent.service"
+
+    if [[ -f "$service_file" ]]; then
+        # Copy service file to systemd directory
+        sudo cp "$service_file" "${systemd_dir}/node-agent.service"
+
+        # Get current username (handle both root and non-root)
+        local service_user="${SUDO_USER:-$USER}"
+        if [[ "$service_user" == "root" ]]; then
+            service_user="root"
+        fi
+
+        # Update service file with correct user
+        sudo sed -i "s|User=ubuntu|User=$service_user|g" "${systemd_dir}/node-agent.service"
+        sudo sed -i "s|Group=ubuntu|Group=$service_user|g" "${systemd_dir}/node-agent.service"
+        sudo sed -i "s|/home/ubuntu/|/home/$service_user/|g" "${systemd_dir}/node-agent.service"
+
+        # Create required directories
+        local base_path="/home/$service_user"
+        if [[ "$service_user" == "root" ]]; then
+            base_path="/root"
+        fi
+        sudo mkdir -p "$base_path/repos"
+        sudo mkdir -p "$base_path/.node-agent/pids"
+        sudo mkdir -p "$base_path/.node-agent/logs"
+
+        # Set ownership
+        sudo chown -R "$service_user:$service_user" "$base_path/repos" 2>/dev/null || true
+        sudo chown -R "$service_user:$service_user" "$base_path/.node-agent" 2>/dev/null || true
+
+        # Reload systemd and enable service
+        sudo systemctl daemon-reload
+        sudo systemctl enable node-agent.service
+
+        # Start the service
+        print_info "Starting Node Agent service..."
+        sudo systemctl start node-agent.service
+
+        # Wait a moment for service to start
+        sleep 3
+
+        # Check if service is running
+        if systemctl is-active --quiet node-agent.service; then
+            print_success "Node Agent installed and running on port 8911"
+            print_info "API available at: http://localhost:8911/api/status"
+        else
+            print_error "Failed to start Node Agent service"
+            print_info "Check logs with: journalctl -u node-agent -f"
+            return 1
+        fi
+    else
+        print_error "systemd service file not found at $service_file"
+        return 1
+    fi
+
+    return 0
 }
 
 # ============================================================================
@@ -1910,6 +2017,11 @@ main() {
                     echo -e "     ${BLUE}→${NC} Will auto-configure with auth key"
                 fi
                 ;;
+            node-agent)
+                echo -e "  ${YELLOW}$step.${NC} Node Agent (Ralph Loop Orchestration)"
+                echo -e "     ${BLUE}→${NC} Will install and start systemd service"
+                echo -e "     ${BLUE}→${NC} API: http://localhost:8911/api/status"
+                ;;
         esac
         ((step++))
         echo ""
@@ -1927,6 +2039,7 @@ main() {
                 vision-mcp-server) echo -e "  ${RED}✗${NC} Vision MCP Server" ;;
                 web-search-mcp) echo -e "  ${RED}✗${NC} Web Search MCP Server" ;;
                 tailscale) echo -e "  ${RED}✗${NC} Tailscale VPN" ;;
+                node-agent) echo -e "  ${RED}✗${NC} Node Agent" ;;
             esac
         done
         echo ""
@@ -1990,6 +2103,9 @@ main() {
             tailscale)
                 echo -e "${BLUE}Step $current_step/$total_steps: Tailscale VPN${NC}"
                 ;;
+            node-agent)
+                echo -e "${BLUE}Step $current_step/$total_steps: Node Agent${NC}"
+                ;;
             orbstack)
                 echo -e "${BLUE}Step $current_step/$total_steps: OrbStack${NC}"
                 ;;
@@ -2004,6 +2120,7 @@ main() {
             vision-mcp-server) install_vision_mcp ;;
             web-search-mcp) install_web_search_mcp ;;
             tailscale) install_tailscale ;;
+            node-agent) install_node_agent ;;
             orbstack) install_orbstack ;;
         esac
         
@@ -2048,7 +2165,8 @@ main() {
             echo "  1. Configure Tailscale: sudo tailscale up"
             echo "  2. ${assistant_next_step}"
             echo "  3. Setup GitHub deploy keys if needed"
-            echo "  4. Start a new Claude Code session to access MCP tools"
+            echo "  4. Node Agent running at: http://localhost:8911/api/status"
+            echo "  5. Start a new Claude Code session to access MCP tools"
             ;;
         codespaces)
             echo "  1. Run 'gh auth login' if not already configured"
