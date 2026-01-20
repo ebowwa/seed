@@ -125,4 +125,41 @@ export abstract class BaseTool implements Tool {
       cacheDir: env.cacheDir,
     };
   }
+
+  /**
+   * Check if running in interactive mode
+   */
+  protected isInteractive(): boolean {
+    return (
+      process.env.NONINTERACTIVE !== "1" &&
+      process.env.CI !== "true" &&
+      process.stdin.isTTY
+    );
+  }
+
+  /**
+   * Prompt user for yes/no input in interactive mode
+   * Returns true if yes, false if no (or non-interactive)
+   */
+  protected async prompt(message: string): Promise<boolean> {
+    if (!this.isInteractive()) {
+      return true; // Default to yes in non-interactive mode
+    }
+
+    process.stdout.write(`${message} [Y/n] `);
+
+    const readline = await import("readline");
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    return new Promise((resolve) => {
+      rl.once("line", (line) => {
+        rl.close();
+        const answer = line.trim().toLowerCase();
+        resolve(answer === "" || answer === "y" || answer === "yes");
+      });
+    });
+  }
 }

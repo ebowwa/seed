@@ -11,8 +11,8 @@ export class NodeAgentTool extends BaseTool {
   description = "Ralph Loop orchestration API server for VPS nodes";
 
   async isApplicable(env: Environment): Promise<boolean> {
-    // Only install on VPS environments
-    return env.type === "vps" || env.type === "container";
+    // Install on all environments (prompt in interactive mode)
+    return true;
   }
 
   async checkInstalled(env: Environment): Promise<boolean> {
@@ -20,6 +20,16 @@ export class NodeAgentTool extends BaseTool {
   }
 
   async install(env: Environment): Promise<void> {
+    // Prompt in interactive mode
+    const shouldInstall = await this.prompt(
+      `Install ${this.name}? (Ralph Loop orchestration API server)`
+    );
+
+    if (!shouldInstall) {
+      console.log(`  ⊘ Skipping ${this.name}`);
+      return;
+    }
+
     const ctx = this.getContext(env);
 
     // For now, we'll install from the seed repo's node-agent directory
