@@ -22,19 +22,30 @@ export class NodeAgentTool extends BaseTool {
   async install(env: Environment): Promise<void> {
     const ctx = this.getContext(env);
 
-    // For now, we'll install from the seed repo's node-agent directory
-    const seedPath = `${ctx.homeDir}/seed`;
-    const agentPath = `${seedPath}/node-agent`;
+    // Find seed repo: try common locations
+    const possiblePaths = [
+      process.cwd(),                    // Current directory
+      `${ctx.homeDir}/seed`,            // ~/seed
+      `/workspaces/seed`,               // Codespaces
+      `/home/${process.env.USER}/seed`, // Linux home
+    ];
 
-    // Check if node-agent directory exists FIRST before prompting
-    const { exitCode } = await this.exec([
-      "test",
-      "-d",
-      agentPath,
-    ]);
+    let seedPath = "";
+    let agentPath = "";
 
-    if (exitCode !== 0) {
-      console.log(`  ⊘ ${this.name} source not found at ${agentPath}, skipping`);
+    for (const path of possiblePaths) {
+      const testPath = `${path}/node-agent`;
+      const { exitCode } = await this.exec(["test", "-d", testPath]);
+      if (exitCode === 0) {
+        seedPath = path;
+        agentPath = testPath;
+        break;
+      }
+    }
+
+    // Check if node-agent directory was found
+    if (!agentPath) {
+      console.log(`  ⊘ ${this.name} source not found (tried: ${possiblePaths.join(", ")}), skipping`);
       return;
     }
 
