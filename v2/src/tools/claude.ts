@@ -23,10 +23,10 @@ export class ClaudeTool extends BaseTool {
 
     console.log(`  Installing ${this.name}...`);
 
-    // Claude is installed via npm
-    const cmd = env.isRoot
-      ? ["npm", "install", "-g", "@anthropic-ai/claude-code"]
-      : ["bun", "install", "-g", "@anthropic-ai/claude-code"];
+    // TINKER: Always use bun, not npm
+    // Issue: Root user tried to use npm, but npm isn't installed
+    // Solution: We just installed bun, use it for everything
+    const cmd = ["bun", "install", "-g", "@anthropic-ai/claude-code"];
 
     const proc = Bun.spawn(cmd, {
       stdout: "inherit",
