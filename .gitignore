@@ -3,11 +3,11 @@
 .env.local
 .env.*.local
 doppler.env
-
+*dist
 # OS files
 .DS_Store
 Thumbs.db
-
+.lock
 # IDE files
 .vscode/
 .idea/
