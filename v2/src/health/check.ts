@@ -114,14 +114,31 @@ async function checkToolHealth(
     };
   }
 
-  // Get version
-  const versionProc = Bun.spawn([name, "--version"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  // Get version with timeout
+  // TINKER: Some tools (like node-agent) may hang on --version
+  // Add 5 second timeout to prevent hanging
+  let version = "";
+  try {
+    const versionProc = Bun.spawn([name, "--version"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
-  const versionOutput = await new Response(versionProc.stdout).text();
-  const version = versionOutput.trim().split("\n")[0];
+    // Race between version output and timeout
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout")), 5000)
+    );
+
+    const output = await Promise.race([
+      new Response(versionProc.stdout).text(),
+      timeout,
+    ]);
+
+    version = output.trim().split("\n")[0];
+  } catch {
+    // Timeout or error - tool exists but version check failed
+    version = "unknown";
+  }
 
   // Get path
   const pathProc = Bun.spawn(["which", name], {
