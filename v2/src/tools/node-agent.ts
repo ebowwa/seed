@@ -202,18 +202,22 @@ WRAPPER_EOF`
       return;
     }
 
-    // TINKER: Use nohup with background and verify it started
-    // Issue: setsid might not be available, need to verify process started
-    // Solution: Use nohup, wait 1s, then check if port is listening
+    // TINKER: Use setsid for true daemonization (detached from parent)
+    // Issue: nohup + & still dies when parent setup script exits
+    // Reason: Bun.spawn shell is child of setup, inherits process group
+    // Solution: setsid creates new session with no controlling terminal
     const logFile = `${agentPath}/node-agent.log`;
-    const startCmd = `cd "${agentPath}" && nohup bun run src/index.ts >> "${logFile}" 2>&1 &`;
+    const startCmd = `cd "${agentPath}" && setsid -w bun run src/index.ts >> "${logFile}" 2>&1 &`;
+
     const proc = Bun.spawn(["sh", "-c", startCmd], {
       cwd: agentPath,
       stdout: "pipe",
       stderr: "pipe",
+      detached: true,
     });
 
-    await proc.exited;
+    // Don't wait for proc - it's backgrounded
+    proc.unref();
 
     // Wait for process to start and open port
     await new Promise(resolve => setTimeout(resolve, 2000));
