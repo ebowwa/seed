@@ -93,25 +93,35 @@ export class NodeAgentTool extends BaseTool {
       throw new Error(`Failed to build ${this.name}`);
     }
 
-    // Create symlink to bin directory
+    // Create wrapper script in bin directory
     const binPath = `${ctx.binDir}/node-agent`;
     await this.ensureDir(ctx.binDir);
 
     try {
-      // Remove existing symlink if present
+      // Remove existing if present
       await this.exec(["rm", "-f", binPath]);
     } catch {}
 
-    // Create symlink to the run script
-    const runScript = `${agentPath}/src/index.ts`;
-    await this.exec([
-      "ln",
-      "-sf",
-      runScript,
-      binPath,
-    ]);
+    // Create a shell wrapper script that runs the TypeScript file with bun
+    const wrapperContent = `#!/bin/bash
+cd "${agentPath}" || exit 1
+bun run src/index.ts "$@"
+`;
 
-    // Make it executable (not needed for TypeScript, but good practice)
+    // Write the wrapper script
+    const writeProc = Bun.spawn([
+      "sh",
+      "-c",
+      `cat > "${binPath}" << 'WRAPPER_EOF'
+${wrapperContent}
+WRAPPER_EOF`
+    ], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    await writeProc.exited;
+
+    // Make it executable
     await this.exec(["chmod", "+x", binPath]);
 
     console.log(`  ✓ ${this.name} installed to ${binPath}`);
