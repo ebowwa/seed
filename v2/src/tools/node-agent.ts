@@ -202,19 +202,18 @@ WRAPPER_EOF`
       return;
     }
 
-    // Run node-agent in background using bun
-    const proc = Bun.spawn(
-      ["bun", "run", "src/index.ts"],
-      {
-        cwd: agentPath,
-        stdout: "inherit",
-        stderr: "inherit",
-        detached: true,
-      }
-    );
+    // TINKER: Use nohup to survive terminal closure
+    // Issue: detached: true + unref() still dies on terminal close
+    // Solution: Use nohup with sh -c to ignore SIGHUP and properly daemonize
+    const logFile = `${agentPath}/node-agent.log`;
+    const startCmd = `cd "${agentPath}" && nohup bun run src/index.ts >> "${logFile}" 2>&1 & echo $!`;
+    const proc = Bun.spawn(["sh", "-c", startCmd], {
+      cwd: agentPath,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
 
-    // Don't wait for it - it runs in background
-    proc.unref();
-    console.log(`  ✓ ${this.name} started in background`);
+    await proc.exited;
+    console.log(`  ✓ ${this.name} started in background (logs: ${logFile})`);
   }
 }
