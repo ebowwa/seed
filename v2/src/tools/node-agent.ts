@@ -202,12 +202,16 @@ WRAPPER_EOF`
       return;
     }
 
-    // TINKER: Use setsid for true daemonization (detached from parent)
-    // Issue: nohup + & still dies when parent setup script exits
-    // Reason: Bun.spawn shell is child of setup, inherits process group
-    // Solution: setsid creates new session with no controlling terminal
+    // TINKER: Platform-specific daemonization
+    // Issue: macOS doesn't have setsid, Linux does
+    // Solution: Use nohup on macOS, setsid on Linux, both with detached
     const logFile = `${agentPath}/node-agent.log`;
-    const startCmd = `cd "${agentPath}" && setsid -w bun run src/index.ts >> "${logFile}" 2>&1 &`;
+    const isMac = process.platform === "darwin";
+
+    // macOS: nohup with detached, Linux: setsid with detached
+    const startCmd = isMac
+      ? `cd "${agentPath}" && nohup bun run src/index.ts >> "${logFile}" 2>&1 &`
+      : `cd "${agentPath}" && setsid bun run src/index.ts >> "${logFile}" 2>&1 &`;
 
     const proc = Bun.spawn(["sh", "-c", startCmd], {
       cwd: agentPath,
