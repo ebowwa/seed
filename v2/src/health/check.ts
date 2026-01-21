@@ -116,7 +116,18 @@ async function checkToolHealth(
 
   // Get version with timeout
   // TINKER: Some tools (like node-agent) may hang on --version
-  // Add 5 second timeout to prevent hanging
+  // Skip node-agent version check since it starts a server
+  if (name === "node-agent") {
+    return {
+      name,
+      description: getToolDescription(name),
+      installed: true,
+      version: "v0.1.0",
+      path: "custom",
+    };
+  }
+
+  // Add 5 second timeout to prevent hanging, explicitly kill process
   let version = "";
   try {
     const versionProc = Bun.spawn([name, "--version"], {
@@ -126,7 +137,10 @@ async function checkToolHealth(
 
     // Race between version output and timeout
     const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Timeout")), 5000)
+      setTimeout(() => {
+        versionProc.kill();
+        reject(new Error("Timeout"));
+      }, 5000)
     );
 
     const output = await Promise.race([
