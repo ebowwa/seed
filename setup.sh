@@ -7,7 +7,11 @@
 # Purpose: Fast, reliable environment setup with compiled binary support
 # ============================================================================
 
+# Exit on error, but allow unset variables (HOME might not be set in some envs)
 set -e
+
+# Ensure HOME is set (some environments don't set it)
+export HOME="${HOME:-/root}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 V2_DIR="${SCRIPT_DIR}/v2"
@@ -30,6 +34,14 @@ print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
 
 install_bun() {
     print_info "Installing Bun..."
+
+    # Install unzip (required by bun install script) on Linux
+    if [ "$(uname -s)" = "Linux" ]; then
+        if ! command -v unzip >/dev/null 2>&1; then
+            print_info "Installing unzip (required for Bun)..."
+            apt-get update -qq && apt-get install -y -qq unzip
+        fi
+    fi
 
     # Detect OS and architecture
     local os
@@ -70,6 +82,16 @@ install_bun() {
         return 1
     fi
 }
+
+# ============================================================================
+# System-wide PATH Configuration (fallback for manual installation)
+# ============================================================================
+# Add bun to system-wide PATH for future sessions
+if [ -w /etc/environment ] && ! grep -q "$HOME/.bun/bin" /etc/environment 2>/dev/null; then
+    print_info "Adding bun to /etc/environment..."
+    echo "PATH=\"$HOME/.bun/bin:\$PATH\"" >> /etc/environment
+    print_success "System PATH configured for future sessions"
+fi
 
 # ============================================================================
 # Check for Bun or install it
