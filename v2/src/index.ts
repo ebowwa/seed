@@ -4,10 +4,10 @@
  * Fast, reliable environment setup powered by Bun
  */
 
-import { detectEnvironment } from "./env/detect.js";
-import { installPackages } from "./env/packages.js";
-import { ToolRegistry } from "./tools/registry.js";
-import { healthCheck } from "./health/check.js";
+import { detectEnvironment } from "./env/detect.ts";
+import { installPackages } from "./env/packages.ts";
+import { ToolRegistry } from "./tools/registry.ts";
+import { healthCheck } from "./health/check.ts";
 
 // ============================================================================
 // CLI Interface

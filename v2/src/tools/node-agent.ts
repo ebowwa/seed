@@ -3,8 +3,8 @@
  * Ralph Loop orchestration API server
  */
 
-import type { Environment } from "../env/detect.js";
-import { BaseTool } from "./base.js";
+import type { Environment } from "../env/detect.ts";
+import { BaseTool } from "./base.ts";
 
 export class NodeAgentTool extends BaseTool {
   name = "node-agent";

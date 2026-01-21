@@ -3,8 +3,8 @@
  * Bun is already installed (we're running on it!), but we can verify/update
  */
 
-import type { Environment } from "../env/detect.js";
-import { BaseTool } from "./base.js";
+import type { Environment } from "../env/detect.ts";
+import { BaseTool } from "./base.ts";
 
 export class BunTool extends BaseTool {
   name = "bun";

@@ -2,8 +2,8 @@
  * GitHub CLI Tool Installer
  */
 
-import type { Environment } from "../env/detect.js";
-import { BaseTool } from "./base.js";
+import type { Environment } from "../env/detect.ts";
+import { BaseTool } from "./base.ts";
 
 export class GhTool extends BaseTool {
   name = "gh";
