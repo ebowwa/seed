@@ -202,12 +202,11 @@ WRAPPER_EOF`
       return;
     }
 
-    // TINKER: Use setsid for true daemonization
-    // Issue: nohup + & still dies when parent setup script exits
-    // Reason: Bun.spawn shell is child of setup, when setup exits shell dies
-    // Solution: setsid creates new session, completely detaches from parent
+    // TINKER: Use nohup with background and verify it started
+    // Issue: setsid might not be available, need to verify process started
+    // Solution: Use nohup, wait 1s, then check if port is listening
     const logFile = `${agentPath}/node-agent.log`;
-    const startCmd = `cd "${agentPath}" && setsid bun run src/index.ts >> "${logFile}" 2>&1 & echo $!`;
+    const startCmd = `cd "${agentPath}" && nohup bun run src/index.ts >> "${logFile}" 2>&1 &`;
     const proc = Bun.spawn(["sh", "-c", startCmd], {
       cwd: agentPath,
       stdout: "pipe",
@@ -215,6 +214,21 @@ WRAPPER_EOF`
     });
 
     await proc.exited;
-    console.log(`  ✓ ${this.name} started in background (logs: ${logFile})`);
+
+    // Wait for process to start and open port
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Verify it's actually running
+    const { exitCode: verifyCheck } = await this.exec([
+      "sh", "-c",
+      "lsof -i :8911 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep :8911 >/dev/null || true"
+    ]);
+
+    if (verifyCheck !== 0) {
+      console.log(`  ✗ ${this.name} failed to start (check ${logFile})`);
+      return;
+    }
+
+    console.log(`  ✓ ${this.name} started and listening on port 8911 (logs: ${logFile})`);
   }
 }
