@@ -25,6 +25,9 @@ interface SetupOptions {
 async function main() {
   const args = process.argv.slice(2);
 
+  // Start overall timer
+  const startTime = performance.now();
+
   // Parse CLI arguments
   const options: SetupOptions = {};
   const positional: string[] = [];
@@ -137,8 +140,10 @@ async function main() {
     );
   }
 
-  // Install tools
+  // Install tools with timing
   log("info", `Installing ${toolsToInstall.length} tools...`);
+
+  const timings: Array<{ name: string; ms: number; status: string }> = [];
 
   for (const tool of toolsToInstall) {
     if (options.dryRun) {
@@ -146,11 +151,19 @@ async function main() {
       continue;
     }
 
+    const toolStart = performance.now();
+
     try {
       log("info", `Installing ${tool.name}...`);
       await tool.install(env);
-      log("success", `${tool.name} installed`);
+      const toolEnd = performance.now();
+      const toolMs = Math.round(toolEnd - toolStart);
+      timings.push({ name: tool.name, ms: toolMs, status: "✓" });
+      log("success", `${tool.name} installed (${toolMs}ms)`);
     } catch (error) {
+      const toolEnd = performance.now();
+      const toolMs = Math.round(toolEnd - toolStart);
+      timings.push({ name: tool.name, ms: toolMs, status: "✗" });
       log("error", `${tool.name} failed: ${error}`);
       if (!options.force) {
         throw error;
@@ -162,6 +175,10 @@ async function main() {
   log("info", "Verifying installation...");
   const health = await healthCheck(env);
 
+  // Calculate total time
+  const endTime = performance.now();
+  const totalMs = Math.round(endTime - startTime);
+
   const issues = health.issues.filter((i) => i.severity === "error");
   if (issues.length > 0) {
     log("warning", "Setup completed with issues:");
@@ -172,12 +189,20 @@ async function main() {
     log("success", "Setup complete! 🎉");
   }
 
+  // Format timings table
+  const timingsTable = timings
+    .map((t) => `  ${t.status} ${t.name.padEnd(15)} ${t.ms.toString().padStart(5)}ms`)
+    .join("\n");
+
   // Show summary
   console.log(`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Environment: ${env.type}
   Tools Installed: ${health.tools.filter((t) => t.installed).length}/${health.tools.length}
   Health: ${issues.length === 0 ? "✓ All good" : `${issues.length} issues`}
+  Total Time: ${totalMs}ms
+
+${timingsTable}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `);
 }
