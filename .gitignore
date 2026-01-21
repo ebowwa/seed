@@ -7,7 +7,7 @@ doppler.env
 # OS files
 .DS_Store
 Thumbs.db
-.lock
+v2/seed-setup
 # IDE files
 .vscode/
 .idea/
@@ -29,8 +29,7 @@ tmp/
 
 # Node/Bun
 node_modules/
-bun.lock
-bun.lockb
+
 
 
 # Python

@@ -1,0 +1,331 @@
+# Dynamic Environment Configuration
+# Defines what tools to install for different situations/environments
+
+# Default tools that are always installed unless explicitly skipped
+defaults:
+  tools:
+    - github-cli
+    - doppler
+
+# Environment-specific configurations
+environments:
+  # VPS/Production Nodes - Minimal setup for servers
+  vps:
+    description: "Production VPS nodes and long-running servers"
+    detect:
+      - env: "MACHINE_TYPE=vps"
+      - env: "IS_VPS=true"
+      - hostname_pattern: "node-*"
+      - hostname_pattern: "vps-*"
+      - file_exists: "/etc/vps-marker"
+    tools:
+      - tailscale     # For secure networking
+      - github-cli    # For deployments and repo management
+      - doppler       # For secrets management
+    skip:
+      - claude-code   # Usually not needed on production servers
+    additional_setup:
+      - install_docker
+      - setup_firewall
+      - configure_monitoring
+
+  # GitHub Codespaces
+  codespaces:
+    description: "GitHub Codespaces development environment"
+    detect:
+      - env: "CODESPACES=true"
+      - env: "GITHUB_CODESPACE_TOKEN"
+      - file_exists: "/workspaces/.codespaces"
+    tools:
+      - github-cli    # Essential for codespaces
+      - doppler       # For secrets management in dev
+    skip:
+      - tailscale     # Usually not needed in codespaces
+    additional_setup:
+      - configure_git_aliases
+      - install_dev_tools
+
+  # Local Development Machine
+  local_dev:
+    description: "Local development workstation"
+    detect:
+      - env: "MACHINE_TYPE=local"
+      - command_exists: "code"  # VS Code installed
+      - os: "darwin"  # macOS
+      - hostname_pattern: ".*"
+    tools:
+      - orbstack     # Fast Docker & Linux VMs for macOS
+      - tailscale
+      - github-cli
+      - doppler       # For managing local secrets
+    additional_setup:
+      - install_docker_desktop
+      - setup_dev_databases
+      - install_ide_extensions
+
+  # CI/CD Environment
+  ci_cd:
+    description: "CI/CD pipeline environment"
+    detect:
+      - env: "CI=true"
+      - env: "GITHUB_ACTIONS=true"
+      - env: "JENKINS_HOME"
+    tools:
+      - github-cli
+    skip:
+      - tailscale
+      - claude-code
+    additional_setup:
+      - setup_build_cache
+      - configure_artifacts
+
+  # Minimal/Container Environment
+  container:
+    description: "Minimal container or Docker environment"
+    detect:
+      - file_exists: "/.dockerenv"
+      - env: "CONTAINER=true"
+    tools:
+      - github-cli    # For pulling code
+    skip:
+      - tailscale
+      - claude-code
+
+# Tool definitions with install methods
+tools:
+  tailscale:
+    name: "Tailscale"
+    description: "Zero-config VPN for secure networking"
+    check_command: "tailscale"
+    install_methods:
+      macos: "brew install tailscale"
+      debian: "curl -fsSL https://tailscale.com/install.sh | sh"
+      redhat: "curl -fsSL https://tailscale.com/install.sh | sh"
+    post_install:
+      - "setup_tailscale_auth"
+    config_env: "TAILSCALE_AUTH_KEY"
+
+  github-cli:
+    name: "GitHub CLI"
+    description: "Command-line interface for GitHub"
+    check_command: "gh"
+    install_methods:
+      macos: "brew install gh"
+      debian: "install_github_cli_debian"
+      redhat: "install_github_cli_redhat"
+    post_install:
+      - "configure_github_auth"
+    config_env: "GITHUB_TOKEN"
+
+  claude-code:
+    name: "Claude Code"
+    description: "AI coding assistant CLI (supports both Anthropic and Z.ai backends)"
+    check_command: "claude"
+    install_methods:
+      macos: "brew install claude-code"
+      debian: "npm install -g @anthropic-ai/claude-code"
+      redhat: "npm install -g @anthropic-ai/claude-code"
+    dependencies:
+      debian: ["nodejs", "npm"]
+      redhat: ["nodejs", "npm"]
+    post_install:
+      - "configure_claude"
+    config_env: "ANTHROPIC_API_KEY"
+
+  doppler:
+    name: "Doppler"
+    description: "SecretOps platform for managing environment variables"
+    check_command: "doppler"
+    install_methods:
+      macos: "brew install dopplerhq/cli/doppler"
+      debian: "install_doppler_debian"
+      redhat: "install_doppler_redhat"
+    post_install:
+      - "configure_doppler_auth"
+    config_env: "DOPPLER_TOKEN"
+
+  vision-mcp-server:
+    name: "Vision MCP Server"
+    description: "Z.AI Vision capabilities via Model Context Protocol for image and video analysis"
+    check_command: "npx -y @z_ai/mcp-server --version"
+    install_methods:
+      macos: "install_vision_mcp"
+      debian: "install_vision_mcp"
+      redhat: "install_vision_mcp"
+    dependencies:
+      all: ["nodejs", "npm"]
+    post_install:
+      - "configure_vision_mcp"
+    config_env: "Z_AI_API_KEY"
+
+  web-search-mcp:
+    name: "Web Search MCP Server"
+    description: "Z.AI Search capabilities via HTTP MCP for real-time web search and information retrieval"
+    check_command: "test -n \"$Z_AI_API_KEY\""
+    install_methods:
+      all: "install_web_search_mcp"
+    post_install:
+      - "configure_web_search_mcp"
+    config_env: "Z_AI_API_KEY"
+
+  orbstack:
+    name: "OrbStack"
+    description: "Fast, lightweight Docker and Linux VM manager for macOS - drop-in Docker Desktop replacement"
+    check_command: "orb"
+    install_methods:
+      macos: "brew install --cask orbstack"
+    post_install:
+      - "start_orbstack"
+    config_env: null
+
+# Additional setup functions that can be called
+additional_functions:
+  install_docker:
+    description: "Install Docker for containerization"
+    commands:
+      debian: |
+        curl -fsSL https://get.docker.com | sh
+        sudo usermod -aG docker $USER
+      redhat: |
+        sudo dnf install -y docker
+        sudo systemctl enable --now docker
+
+  setup_firewall:
+    description: "Configure basic firewall rules"
+    commands:
+      debian: |
+        sudo ufw allow 22/tcp
+        sudo ufw allow 443/tcp
+        sudo ufw allow 80/tcp
+        sudo ufw --force enable
+
+  configure_monitoring:
+    description: "Setup basic monitoring tools"
+    commands:
+      all: |
+        # Install monitoring agents if needed
+        echo "Monitoring setup would go here"
+
+  configure_git_aliases:
+    description: "Setup useful git aliases"
+    commands:
+      all: |
+        git config --global alias.co checkout
+        git config --global alias.br branch
+        git config --global alias.ci commit
+        git config --global alias.st status
+        git config --global alias.lg "log --oneline --graph --decorate"
+
+  install_dev_tools:
+    description: "Install common development tools"
+    commands:
+      debian: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential curl wget vim htop
+      macos: |
+        brew install wget vim htop jq yq
+
+  install_doppler_debian:
+    description: "Install Doppler CLI on Debian/Ubuntu"
+    commands:
+      debian: |
+        # Install pre-reqs
+        sudo apt-get update && sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+        # Add Doppler's GPG key
+        curl -sLf --retry 3 --tlsv1.2 --proto "=https" 'https://packages.doppler.com/public/cli/gpg.DE2A7741A397C129.key' | sudo gpg --dearmor -o /usr/share/keyrings/doppler-archive-keyring.gpg
+        echo "deb [signed-by=/usr/share/keyrings/doppler-archive-keyring.gpg] https://packages.doppler.com/public/cli/deb/debian any-version main" | sudo tee /etc/apt/sources.list.d/doppler-cli.list
+        # Install Doppler
+        sudo apt-get update && sudo apt-get install doppler
+
+  install_doppler_redhat:
+    description: "Install Doppler CLI on RedHat/CentOS"
+    commands:
+      redhat: |
+        # Add Doppler's YUM repo
+        sudo rpm --import 'https://packages.doppler.com/public/cli/gpg.DE2A7741A397C129.key'
+        curl -sLf --retry 3 --tlsv1.2 --proto "=https" 'https://packages.doppler.com/public/cli/config.rpm.txt' | sudo tee /etc/yum.repos.d/doppler-cli.repo
+        # Install Doppler
+        sudo yum install doppler
+
+  configure_doppler_auth:
+    description: "Configure Doppler authentication"
+    commands:
+      all: |
+        # Login to Doppler if token is available
+        if [ -n "$DOPPLER_TOKEN" ]; then
+          echo "$DOPPLER_TOKEN" | doppler configure set token --scope /
+        fi
+
+  install_vision_mcp:
+    description: "Install Vision MCP Server for Z.AI"
+    commands:
+      all: |
+        # Vision MCP Server is installed via npx, but ensure Node.js is available
+        if ! command -v node >/dev/null 2>&1; then
+          echo "Node.js is required for Vision MCP Server"
+          exit 1
+        fi
+        # Test installation
+        npx -y @z_ai/mcp-server --version >/dev/null 2>&1 || {
+          echo "Failed to install Vision MCP Server"
+          exit 1
+        }
+
+  configure_vision_mcp:
+    description: "Configure Vision MCP Server with Z.AI API"
+    commands:
+      all: |
+        # Ensure Z.AI API key is available
+        if [ -z "$Z_AI_API_KEY" ] && [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+          echo "Warning: No Z.AI API key found. Set Z_AI_API_KEY or configure Doppler."
+        fi
+
+  install_web_search_mcp:
+    description: "Configure Web Search MCP Server"
+    commands:
+      all: |
+        # Web Search MCP is remote HTTP-based, no local installation needed
+        echo "Web Search MCP Server configured as remote service"
+
+  configure_web_search_mcp:
+    description: "Configure Web Search MCP Server with Z.AI API"
+    commands:
+      all: |
+        # Ensure Z.AI API key is available for web search
+        if [ -z "$Z_AI_API_KEY" ] && [ -z "$ANTHROPIC_AUTH_TOKEN" ]; then
+          echo "Warning: No Z.AI API key found. Set Z_AI_API_KEY to enable web search."
+        fi
+
+  configure_claude:
+    description: "Configure Claude Code with appropriate backend"
+    commands:
+      all: |
+        # Configure Claude Code based on user preference
+        if [ "${AI_ASSISTANT:-claude}" = "zai" ]; then
+          # Setup Claude Code with Z.ai backend
+          if [ -f "./.claude/settings.template.json" ]; then
+            ./install-claude-settings.sh
+          fi
+        else
+          # Setup Claude Code with Anthropic backend
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            claude auth login --key "$ANTHROPIC_API_KEY" 2>/dev/null || {
+              print_info "Please run: claude auth login"
+            }
+          else
+            claude auth login 2>/dev/null || {
+              print_info "Please run: claude auth login"
+            }
+          fi
+        fi
+
+# Custom environments can be added here
+custom:
+  # Example: Add your own custom environment
+  # my_special_env:
+  #   detect:
+  #     - env: "MY_ENV=special"
+  #   tools:
+  #     - github-cli
+  #   additional_setup:
+  #     - my_custom_function
