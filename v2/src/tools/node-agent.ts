@@ -20,6 +20,24 @@ export class NodeAgentTool extends BaseTool {
   }
 
   async install(env: Environment): Promise<void> {
+    const ctx = this.getContext(env);
+
+    // For now, we'll install from the seed repo's node-agent directory
+    const seedPath = `${ctx.homeDir}/seed`;
+    const agentPath = `${seedPath}/node-agent`;
+
+    // Check if node-agent directory exists FIRST before prompting
+    const { exitCode } = await this.exec([
+      "test",
+      "-d",
+      agentPath,
+    ]);
+
+    if (exitCode !== 0) {
+      console.log(`  ⊘ ${this.name} source not found at ${agentPath}, skipping`);
+      return;
+    }
+
     // Prompt in interactive mode
     const shouldInstall = await this.prompt(
       `Install ${this.name}? (Ralph Loop orchestration API server)`
@@ -30,26 +48,7 @@ export class NodeAgentTool extends BaseTool {
       return;
     }
 
-    const ctx = this.getContext(env);
-
-    // For now, we'll install from the seed repo's node-agent directory
-    const seedPath = `${ctx.homeDir}/seed`;
-    const agentPath = `${seedPath}/node-agent`;
-
     console.log(`  Installing ${this.name}...`);
-
-    // Check if node-agent directory exists
-    const { exitCode } = await this.exec([
-      "test",
-      "-d",
-      agentPath,
-    ]);
-
-    if (exitCode !== 0) {
-      console.log(`  ⚠ ${this.name} source not found at ${agentPath}`);
-      console.log(`  ℹ Skipping ${this.name} installation`);
-      return;
-    }
 
     // Install dependencies
     console.log(`  → Installing dependencies...`);

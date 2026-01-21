@@ -23,9 +23,13 @@ export class DopplerTool extends BaseTool {
     console.log(`  Installing ${this.name}...`);
 
     // Doppler provides a curl install script
+    // In codespaces/containers, we need to use sudo or install to user dir
+    const useSudo = env.hasSudo && !env.isRoot;
+    const sudoPrefix = useSudo ? "sudo" : "";
+
     const installCmd = `
       set -e
-      curl -Ls https://cli.doppler.com/install.sh | sh
+      curl -Ls https://cli.doppler.com/install.sh | ${sudoPrefix} sh
     `;
 
     const proc = Bun.spawn(["bash", "-c", installCmd], {
@@ -37,7 +41,20 @@ export class DopplerTool extends BaseTool {
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-      throw new Error(`Failed to install ${this.name}`);
+      // Try installing to user directory as fallback
+      console.log(`  → Trying user directory installation...`);
+      const userInstallCmd = `
+        set -e
+        curl -Ls https://cli.doppler.com/install.sh | INSTALL_DIR=$HOME/.local/bin sh
+      `;
+      const userProc = Bun.spawn(["bash", "-c", userInstallCmd], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      const userExitCode = await userProc.exited;
+      if (userExitCode !== 0) {
+        throw new Error(`Failed to install ${this.name}`);
+      }
     }
 
     console.log(`  ✓ ${this.name} installed`);
