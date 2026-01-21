@@ -4,6 +4,10 @@
  * Fast, reliable environment setup powered by Bun
  */
 
+// TINKER: Import path resolution
+// Originally used ".js" extensions (ESM standard) → Bun couldn't find modules
+// Then tried ".ts" extensions → Still didn't work
+// Solution: Use no extensions, Bun resolves them correctly
 import { detectEnvironment } from "./env/detect";
 import { installPackages } from "./env/packages";
 import { ToolRegistry } from "./tools/registry";
@@ -141,6 +145,7 @@ async function main() {
   }
 
   // Install tools with timing
+  // TINKER: Added performance tracking to measure each tool install time
   log("info", `Installing ${toolsToInstall.length} tools...`);
 
   const timings: Array<{ name: string; ms: number; status: string }> = [];

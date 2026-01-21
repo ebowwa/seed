@@ -48,6 +48,8 @@ install_bun() {
     esac
 
     # Download and install Bun
+    # FIX: Original URL was https://bun.sh/install/install.sh (404 error)
+    # Correct URL is https://bun.sh/install
     local bun_url="https://bun.sh/install"
 
     if command -v curl >/dev/null 2>&1; then

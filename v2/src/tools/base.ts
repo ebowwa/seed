@@ -71,6 +71,8 @@ export abstract class BaseTool implements Tool {
 
   /**
    * Ensure a directory exists
+   * TINKER: Bun.mkdir() doesn't exist → TypeError: Bun.mkdir is not a function
+   * Solution: Use shell `mkdir -p` command instead
    */
   protected async ensureDir(path: string): Promise<void> {
     const proc = Bun.spawn(["mkdir", "-p", path], {

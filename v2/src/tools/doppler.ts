@@ -22,6 +22,10 @@ export class DopplerTool extends BaseTool {
   async install(env: Environment): Promise<void> {
     console.log(`  Installing ${this.name}...`);
 
+    // TINKER: Simplified to just use sudo
+    // Tried: User directory install with INSTALL_DIR variable
+    // Issue: Doppler script ignores INSTALL_DIR, always uses dpkg
+    // Solution: Use sudo directly, codespaces has it available
     const installCmd = `
       set -e
       curl -Ls https://cli.doppler.com/install.sh | sudo sh

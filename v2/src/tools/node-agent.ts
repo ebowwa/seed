@@ -22,7 +22,10 @@ export class NodeAgentTool extends BaseTool {
   async install(env: Environment): Promise<void> {
     const ctx = this.getContext(env);
 
-    // Find seed repo: try common locations
+    // TINKER: Multi-location path detection
+    // Original: Only checked ${ctx.homeDir}/seed
+    // Issue: Codespaces uses /workspaces/seed, not ~/seed
+    // Solution: Try multiple common locations
     const possiblePaths = [
       process.cwd(),                    // Current directory
       `${ctx.homeDir}/seed`,            // ~/seed
@@ -78,6 +81,9 @@ export class NodeAgentTool extends BaseTool {
     }
 
     // Build the agent
+    // TINKER: Add --target bun for Node.js built-ins
+    // Issue: Browser build cannot import Node.js builtin: "child_process"
+    // Solution: --target bun tells Bun to build for Bun runtime, not browser
     console.log(`  → Building ${this.name}...`);
     const buildProc = Bun.spawn(
       ["bun", "build", "src/index.ts", "--target", "bun", "--outdir", "dist"],
@@ -94,6 +100,9 @@ export class NodeAgentTool extends BaseTool {
     }
 
     // Create wrapper script in bin directory
+    // TINKER: Shell wrapper instead of symlink to .ts file
+    // Issue: Symlink to src/index.ts caused ENOEXEC (can't execute .ts directly)
+    // Solution: Create executable shell wrapper that runs with bun
     const binPath = `${ctx.binDir}/node-agent`;
     await this.ensureDir(ctx.binDir);
 
@@ -180,7 +189,9 @@ WRAPPER_EOF`
   }
 
   private async runDirectly(agentPath: string): Promise<void> {
-    // Check if node-agent is already running on port 8911
+    // TINKER: Check if port already in use before spawning
+    // Issue: EADDRINUSE error when trying to start second instance
+    // Solution: Check port 8911 with lsof/netstat before starting
     const { exitCode: portCheck } = await this.exec([
       "sh", "-c",
       "lsof -i :8911 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep :8911 >/dev/null || true"
