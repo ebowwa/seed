@@ -225,7 +225,17 @@ WRAPPER_EOF`
     ]);
 
     if (verifyCheck !== 0) {
-      console.log(`  ✗ ${this.name} failed to start (check ${logFile})`);
+      console.log(`  ✗ ${this.name} failed to start`);
+      // Show last 10 lines of log
+      try {
+        const tailProc = Bun.spawn(["tail", "-n", "10", logFile], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const logOutput = await new Response(tailProc.stdout).text();
+        await tailProc.exited;
+        console.log(`  Log output:\n${logOutput.split("\n").map(l => "    " + l).join("\n")}`);
+      } catch {}
       return;
     }
 
