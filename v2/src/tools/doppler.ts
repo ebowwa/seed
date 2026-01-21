@@ -22,37 +22,37 @@ export class DopplerTool extends BaseTool {
   async install(env: Environment): Promise<void> {
     console.log(`  Installing ${this.name}...`);
 
-    // Doppler provides a curl install script
-    // In codespaces/containers, we need to use sudo or install to user dir
-    const useSudo = env.hasSudo && !env.isRoot;
-    const sudoPrefix = useSudo ? "sudo" : "";
-
-    const installCmd = `
+    // Try user directory installation first (works in codespaces without sudo)
+    console.log(`  → Installing to user directory...`);
+    const userInstallCmd = `
       set -e
-      curl -Ls https://cli.doppler.com/install.sh | ${sudoPrefix} sh
+      mkdir -p $HOME/.local/bin
+      curl -Ls https://cli.doppler.com/install.sh | INSTALL_DIR=$HOME/.local/bin sh
     `;
 
-    const proc = Bun.spawn(["bash", "-c", installCmd], {
+    const userProc = Bun.spawn(["bash", "-c", userInstallCmd], {
       stdout: "inherit",
       stderr: "inherit",
-      env: { ...process.env },
     });
+    const userExitCode = await userProc.exited;
 
-    const exitCode = await proc.exited;
-
-    if (exitCode !== 0) {
-      // Try installing to user directory as fallback
-      console.log(`  → Trying user directory installation...`);
-      const userInstallCmd = `
-        set -e
-        curl -Ls https://cli.doppler.com/install.sh | INSTALL_DIR=$HOME/.local/bin sh
-      `;
-      const userProc = Bun.spawn(["bash", "-c", userInstallCmd], {
-        stdout: "inherit",
-        stderr: "inherit",
-      });
-      const userExitCode = await userProc.exited;
-      if (userExitCode !== 0) {
+    if (userExitCode !== 0) {
+      // Try system installation with sudo as fallback
+      if (env.hasSudo && !env.isRoot) {
+        console.log(`  → Trying system installation with sudo...`);
+        const systemInstallCmd = `
+          set -e
+          curl -Ls https://cli.doppler.com/install.sh | sudo sh
+        `;
+        const systemProc = Bun.spawn(["bash", "-c", systemInstallCmd], {
+          stdout: "inherit",
+          stderr: "inherit",
+        });
+        const systemExitCode = await systemProc.exited;
+        if (systemExitCode !== 0) {
+          throw new Error(`Failed to install ${this.name}`);
+        }
+      } else {
         throw new Error(`Failed to install ${this.name}`);
       }
     }
