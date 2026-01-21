@@ -4,8 +4,8 @@ import { promises as fsp } from "fs";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import path from "path";
-import type { RalphLoop, RalphLoopStateFile, CreateRalphLoopRequest, RalphLoopCommit } from "../types/index.js";
-import { GitService } from "./git.js";
+import type { RalphLoop, RalphLoopStateFile, CreateRalphLoopRequest, RalphLoopCommit } from "../types/index";
+import { GitService } from "./git";
 
 const execAsync = promisify(exec);
 
