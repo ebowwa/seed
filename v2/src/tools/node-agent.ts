@@ -180,6 +180,17 @@ WRAPPER_EOF`
   }
 
   private async runDirectly(agentPath: string): Promise<void> {
+    // Check if node-agent is already running on port 8911
+    const { exitCode: portCheck } = await this.exec([
+      "sh", "-c",
+      "lsof -i :8911 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep :8911 >/dev/null || true"
+    ]);
+
+    if (portCheck === 0) {
+      console.log(`  ✓ ${this.name} already running on port 8911`);
+      return;
+    }
+
     // Run node-agent in background using bun
     const proc = Bun.spawn(
       ["bun", "run", "src/index.ts"],
