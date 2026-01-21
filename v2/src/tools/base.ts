@@ -73,14 +73,12 @@ export abstract class BaseTool implements Tool {
    * Ensure a directory exists
    */
   protected async ensureDir(path: string): Promise<void> {
-    try {
-      await Bun.mkdir(path, { recursive: true });
-    } catch (err) {
-      // Ignore if already exists
-      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw err;
-      }
-    }
+    const proc = Bun.spawn(["mkdir", "-p", path], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    await proc.exited;
+    // mkdir -p doesn't fail if directory exists
   }
 
   /**
