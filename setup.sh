@@ -31,6 +31,14 @@ print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
 install_bun() {
     print_info "Installing Bun..."
 
+    # Install unzip (required by bun install script) on Linux
+    if [ "$(uname -s)" = "Linux" ]; then
+        if ! command -v unzip >/dev/null 2>&1; then
+            print_info "Installing unzip (required for Bun)..."
+            apt-get update -qq && apt-get install -y -qq unzip
+        fi
+    fi
+
     # Detect OS and architecture
     local os
     local arch
