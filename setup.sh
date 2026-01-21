@@ -7,7 +7,11 @@
 # Purpose: Fast, reliable environment setup with compiled binary support
 # ============================================================================
 
+# Exit on error, but allow unset variables (HOME might not be set in some envs)
 set -e
+
+# Ensure HOME is set (some environments don't set it)
+export HOME="${HOME:-/root}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 V2_DIR="${SCRIPT_DIR}/v2"
