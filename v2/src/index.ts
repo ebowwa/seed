@@ -180,6 +180,9 @@ async function main() {
   log("info", "Verifying installation...");
   const health = await healthCheck(env);
 
+  // Configure PATH for bun
+  await configureBunPath();
+
   // Calculate total time
   const endTime = performance.now();
   const totalMs = Math.round(endTime - startTime);
@@ -254,6 +257,31 @@ function log(
     `${color}${prefix} ${timestamp} ${message}${colors.reset}`,
     ...args
   );
+}
+
+async function configureBunPath() {
+  const envFile = "/etc/environment";
+  const bunPath = "/.bun/bin";
+
+  try {
+    const content = await Bun.file(envFile).text();
+    if (content.includes(bunPath)) {
+      log("info", "Bun PATH already configured in /etc/environment");
+      return;
+    }
+  } catch {
+    log("info", "Could not read /etc/environment (may not exist or no permission)");
+    return;
+  }
+
+  try {
+    const content = await Bun.file(envFile).text();
+    const updated = content.trim() + `\nPATH="${bunPath}:$PATH"\n`;
+    await Bun.write(envFile, updated);
+    log("success", `Added bun PATH to ${envFile}`);
+  } catch {
+    log("warning", `Could not write to ${envFile} (permission denied)`);
+  }
 }
 
 function showHelp() {

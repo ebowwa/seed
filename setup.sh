@@ -84,6 +84,16 @@ install_bun() {
 }
 
 # ============================================================================
+# System-wide PATH Configuration (fallback for manual installation)
+# ============================================================================
+# Add bun to system-wide PATH for future sessions
+if [ -w /etc/environment ] && ! grep -q "$HOME/.bun/bin" /etc/environment 2>/dev/null; then
+    print_info "Adding bun to /etc/environment..."
+    echo "PATH=\"$HOME/.bun/bin:\$PATH\"" >> /etc/environment
+    print_success "System PATH configured for future sessions"
+fi
+
+# ============================================================================
 # Check for Bun or install it
 # ============================================================================
 
