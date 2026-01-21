@@ -22,39 +22,20 @@ export class DopplerTool extends BaseTool {
   async install(env: Environment): Promise<void> {
     console.log(`  Installing ${this.name}...`);
 
-    // Try user directory installation first (works in codespaces without sudo)
-    console.log(`  → Installing to user directory...`);
-    const userInstallCmd = `
+    const installCmd = `
       set -e
-      mkdir -p $HOME/.local/bin
-      curl -Ls https://cli.doppler.com/install.sh | INSTALL_DIR=$HOME/.local/bin sh
+      curl -Ls https://cli.doppler.com/install.sh | sudo sh
     `;
 
-    const userProc = Bun.spawn(["bash", "-c", userInstallCmd], {
+    const proc = Bun.spawn(["bash", "-c", installCmd], {
       stdout: "inherit",
       stderr: "inherit",
     });
-    const userExitCode = await userProc.exited;
 
-    if (userExitCode !== 0) {
-      // Try system installation with sudo as fallback
-      if (env.hasSudo && !env.isRoot) {
-        console.log(`  → Trying system installation with sudo...`);
-        const systemInstallCmd = `
-          set -e
-          curl -Ls https://cli.doppler.com/install.sh | sudo sh
-        `;
-        const systemProc = Bun.spawn(["bash", "-c", systemInstallCmd], {
-          stdout: "inherit",
-          stderr: "inherit",
-        });
-        const systemExitCode = await systemProc.exited;
-        if (systemExitCode !== 0) {
-          throw new Error(`Failed to install ${this.name}`);
-        }
-      } else {
-        throw new Error(`Failed to install ${this.name}`);
-      }
+    const exitCode = await proc.exited;
+
+    if (exitCode !== 0) {
+      throw new Error(`Failed to install ${this.name}`);
     }
 
     console.log(`  ✓ ${this.name} installed`);
