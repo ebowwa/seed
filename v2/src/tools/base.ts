@@ -3,8 +3,8 @@
  * Abstract base for tool installers
  */
 
-import type { Environment } from "../env/detect.ts";
-import type { Tool } from "./registry.ts";
+import type { Environment } from "../env/detect";
+import type { Tool } from "./registry";
 
 export interface ToolContext {
   env: Environment;

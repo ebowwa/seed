@@ -3,13 +3,13 @@
  * Manages tool discovery, filtering, and installation
  */
 
-import type { Environment } from "../env/detect.ts";
-import type { SetupOptions } from "../env/packages.ts";
-import { BunTool } from "./bun.ts";
-import { NodeAgentTool } from "./node-agent.ts";
-import { ClaudeTool } from "./claude.ts";
-import { GhTool } from "./gh.ts";
-import { DopplerTool } from "./doppler.ts";
+import type { Environment } from "../env/detect";
+import type { SetupOptions } from "../env/packages";
+import { BunTool } from "./bun";
+import { NodeAgentTool } from "./node-agent";
+import { ClaudeTool } from "./claude";
+import { GhTool } from "./gh";
+import { DopplerTool } from "./doppler";
 
 export interface Tool {
   name: string;

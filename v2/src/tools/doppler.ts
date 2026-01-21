@@ -3,8 +3,8 @@
  * Secrets management for development and production
  */
 
-import type { Environment } from "../env/detect.ts";
-import { BaseTool } from "./base.ts";
+import type { Environment } from "../env/detect";
+import { BaseTool } from "./base";
 
 export class DopplerTool extends BaseTool {
   name = "doppler";

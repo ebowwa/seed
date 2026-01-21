@@ -3,8 +3,8 @@
  * Verifies installation status and system health
  */
 
-import type { Environment } from "../env/detect.ts";
-import { ToolRegistry } from "../tools/registry.ts";
+import type { Environment } from "../env/detect";
+import { ToolRegistry } from "../tools/registry";
 
 export interface HealthResult {
   status: "healthy" | "warning" | "error";

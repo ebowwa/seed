@@ -2,8 +2,8 @@
  * Claude Code CLI Tool Installer
  */
 
-import type { Environment } from "../env/detect.ts";
-import { BaseTool } from "./base.ts";
+import type { Environment } from "../env/detect";
+import { BaseTool } from "./base";
 
 export class ClaudeTool extends BaseTool {
   name = "claude";
