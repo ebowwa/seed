@@ -194,7 +194,7 @@ WRAPPER_EOF`
     // Solution: Check port 8911 with lsof/netstat before starting
     const { exitCode: portCheck } = await this.exec([
       "sh", "-c",
-      "lsof -i :8911 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep :8911 >/dev/null || true"
+      "lsof -i :8911 >/dev/null 2>&1 || netstat -an | grep LISTEN | grep \\.8911 >/dev/null 2>&1"
     ]);
 
     if (portCheck === 0) {
@@ -225,7 +225,7 @@ WRAPPER_EOF`
     // Verify it's actually running
     const { exitCode: verifyCheck } = await this.exec([
       "sh", "-c",
-      "lsof -i :8911 >/dev/null 2>&1 || netstat -tlnp 2>/dev/null | grep :8911 >/dev/null || true"
+      "lsof -i :8911 >/dev/null 2>&1 || netstat -an | grep LISTEN | grep \\.8911 >/dev/null 2>&1"
     ]);
 
     if (verifyCheck !== 0) {
