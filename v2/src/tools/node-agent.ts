@@ -202,11 +202,12 @@ WRAPPER_EOF`
       return;
     }
 
-    // TINKER: Use nohup to survive terminal closure
-    // Issue: detached: true + unref() still dies on terminal close
-    // Solution: Use nohup with sh -c to ignore SIGHUP and properly daemonize
+    // TINKER: Use setsid for true daemonization
+    // Issue: nohup + & still dies when parent setup script exits
+    // Reason: Bun.spawn shell is child of setup, when setup exits shell dies
+    // Solution: setsid creates new session, completely detaches from parent
     const logFile = `${agentPath}/node-agent.log`;
-    const startCmd = `cd "${agentPath}" && nohup bun run src/index.ts >> "${logFile}" 2>&1 & echo $!`;
+    const startCmd = `cd "${agentPath}" && setsid bun run src/index.ts >> "${logFile}" 2>&1 & echo $!`;
     const proc = Bun.spawn(["sh", "-c", startCmd], {
       cwd: agentPath,
       stdout: "pipe",
