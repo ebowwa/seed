@@ -39,7 +39,10 @@ __pycache__/
 *$py.class
 .Python
 venv/
+
+# Environment directories (but allow v2/src/env)
 env/
+!v2/src/env/
 
 # Secrets
 *.key
