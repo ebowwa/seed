@@ -1,7 +1,7 @@
 // Node Agent - Main HTTP Server
 
-import { RalphService } from "./services/ralph.js";
-import { GitService } from "./services/git.js";
+import { RalphService } from "./services/ralph";
+import { GitService } from "./services/git";
 import type {
   NodeStatus,
   CreateWorktreeRequest,
@@ -9,7 +9,7 @@ import type {
   Worktree,
   RalphLoop,
   ApiError,
-} from "./types/index.js";
+} from "./types/index";
 
 // Configuration
 const PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
