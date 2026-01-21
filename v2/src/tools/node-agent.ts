@@ -80,7 +80,7 @@ export class NodeAgentTool extends BaseTool {
     // Build the agent
     console.log(`  → Building ${this.name}...`);
     const buildProc = Bun.spawn(
-      ["bun", "build", "src/index.ts", "--outdir", "dist"],
+      ["bun", "build", "src/index.ts", "--target", "bun", "--outdir", "dist"],
       {
         cwd: agentPath,
         stdout: "inherit",
