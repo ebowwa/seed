@@ -4,6 +4,7 @@ This document tracks versions of [Claude Code](https://github.com/anthropics/cla
 
 | Date | Version | Status |
 |------|---------|--------|
+| 2026-01-22 | 2.1.15 | ✅ Tracked |
 | 2026-01-21 | 2.1.14 | ✅ Tracked |
 | 2026-01-17 | 2.1.12 | ✅ Tracked |
 | 2026-01-16 | 2.1.9 | ✅ Tracked |
