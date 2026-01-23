@@ -25,9 +25,11 @@ export class NodeAgentTool extends BaseTool {
     // TINKER: Multi-location path detection
     // Original: Only checked ${ctx.homeDir}/seed
     // Issue: Codespaces uses /workspaces/seed, not ~/seed
-    // Solution: Try multiple common locations
+    // Issue: process.cwd() is v2, need to check parent for node-agent
+    // Solution: Try multiple common locations including parent of cwd
     const possiblePaths = [
-      process.cwd(),                    // Current directory
+      process.cwd(),                    // Current directory (might be v2)
+      `${process.cwd()}/..`,            // Parent of current directory
       `${ctx.homeDir}/seed`,            // ~/seed
       `/workspaces/seed`,               // Codespaces
       `/home/${process.env.USER}/seed`, // Linux home
@@ -37,10 +39,18 @@ export class NodeAgentTool extends BaseTool {
     let agentPath = "";
 
     for (const path of possiblePaths) {
-      const testPath = `${path}/node-agent`;
+      // Resolve relative paths to absolute paths
+      let resolvedPath = path;
+      if (path === "." || path === "./" || path.startsWith("..") || !path.startsWith("/")) {
+        // Use realpath to resolve relative paths to absolute
+        const { stdout } = await this.exec(["realpath", path]);
+        resolvedPath = stdout.trim();
+      }
+
+      const testPath = `${resolvedPath}/node-agent`;
       const { exitCode } = await this.exec(["test", "-d", testPath]);
       if (exitCode === 0) {
-        seedPath = path;
+        seedPath = resolvedPath;
         agentPath = testPath;
         break;
       }
