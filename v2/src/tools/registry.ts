@@ -11,6 +11,8 @@ import { ClaudeTool } from "./claude";
 import { LaneTool } from "./lane";
 import { GhTool } from "./gh";
 import { DopplerTool } from "./doppler";
+import { NodeTool } from "./node";
+import { TmuxTool } from "./tmux";
 
 export interface Tool {
   name: string;
@@ -45,6 +47,8 @@ export class ToolRegistry {
     // Register all available tools
     this.tools = [
       new BunTool(),
+      new NodeTool(),
+      new TmuxTool(),
       new NodeAgentTool(),
       new ClaudeTool(),
       new LaneTool(),
