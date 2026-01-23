@@ -260,8 +260,20 @@ function log(
 }
 
 async function configureBunPath() {
-  const envFile = "/etc/environment";
   const bunPath = `${process.env.HOME}/.bun/bin`;
+  const pathLine = `export PATH="${bunPath}:$PATH"`;
+
+  // List of shell config files to try, in order of preference
+  const shellConfigs = [
+    `${process.env.HOME}/.zshrc`,
+    `${process.env.HOME}/.bashrc`,
+    `${process.env.HOME}/.bash_profile`,
+    `${process.env.HOME}/.profile`,
+  ];
+
+  // First, try /etc/environment (system-wide, requires sudo)
+  const envFile = "/etc/environment";
+  let configured = false;
 
   try {
     const content = await Bun.file(envFile).text();
@@ -270,8 +282,7 @@ async function configureBunPath() {
       return;
     }
   } catch {
-    log("info", "Could not read /etc/environment (may not exist or no permission)");
-    return;
+    // /etc/environment not readable, try shell configs
   }
 
   try {
@@ -279,8 +290,45 @@ async function configureBunPath() {
     const updated = content.trim() + `\nPATH="${bunPath}:$PATH"\n`;
     await Bun.write(envFile, updated);
     log("success", `Added bun PATH to ${envFile}`);
+    configured = true;
   } catch {
-    log("warning", `Could not write to ${envFile} (permission denied)`);
+    // No sudo or write failed, continue to shell configs
+  }
+
+  // If system-wide failed, try shell config files
+  if (!configured) {
+    for (const configPath of shellConfigs) {
+      try {
+        // Check if file exists
+        const existsProc = Bun.spawn(["test", "-f", configPath], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const exitCode = await existsProc.exited;
+
+        let content = "";
+        if (exitCode === 0) {
+          content = await Bun.file(configPath).text();
+          // Check if already configured
+          if (content.includes(bunPath)) {
+            log("info", `Bun PATH already configured in ${configPath}`);
+            return;
+          }
+        }
+
+        // Append PATH configuration
+        const updated = content.trim() + `\n${pathLine}\n`;
+        await Bun.write(configPath, updated);
+        log("success", `Added bun PATH to ${configPath}`);
+        return;
+      } catch {
+        // Try next config file
+        continue;
+      }
+    }
+
+    log("warning", "Could not configure bun PATH in any shell config");
+    log("info", `Add this to your shell config: export PATH="${bunPath}:$PATH"`);
   }
 }
 
