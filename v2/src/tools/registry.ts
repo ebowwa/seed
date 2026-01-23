@@ -8,8 +8,11 @@ import type { SetupOptions } from "../env/packages";
 import { BunTool } from "./bun";
 import { NodeAgentTool } from "./node-agent";
 import { ClaudeTool } from "./claude";
+import { LaneTool } from "./lane";
 import { GhTool } from "./gh";
 import { DopplerTool } from "./doppler";
+import { NodeTool } from "./node";
+import { TmuxTool } from "./tmux";
 
 export interface Tool {
   name: string;
@@ -44,8 +47,11 @@ export class ToolRegistry {
     // Register all available tools
     this.tools = [
       new BunTool(),
+      new NodeTool(),
+      new TmuxTool(),
       new NodeAgentTool(),
       new ClaudeTool(),
+      new LaneTool(),
       new GhTool(),
       new DopplerTool(),
     ];

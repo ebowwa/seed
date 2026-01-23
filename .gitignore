@@ -48,3 +48,4 @@ env/
 *.pem
 *.cert
 doppler.envv2/seed-setup
+tests/results/
