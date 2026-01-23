@@ -23,12 +23,38 @@ export class ClaudeTool extends BaseTool {
 
     console.log(`  Installing ${this.name}...`);
 
-    // TINKER: Always use bun, not npm
-    // Issue: Root user tried to use npm, but npm isn't installed
-    // Solution: We just installed bun, use it for everything
-    const cmd = ["bun", "install", "-g", "@anthropic-ai/claude-code"];
+    // FIX: Use native installer instead of bun/npm (both deprecated)
+    // bun install -g has known issues: https://github.com/anthropics/claude-code/issues/8304
+    // See: https://www.reddit.com/r/ClaudeAI/comments/1ma3tkb/dont_use_bun_to_install_cc/
+    //
+    // Native installer works on both Linux and macOS:
+    // - Linux: Installs to ~/.local/bin or /usr/local/bin
+    // - macOS: Installs to /usr/local/bin (also available via Homebrew)
 
-    const proc = Bun.spawn(cmd, {
+    let installScript: string;
+
+    if (env.os === "macos") {
+      // macOS: Try Homebrew first (faster, more reliable), fall back to native installer
+      console.log("  Trying Homebrew installation (macOS)...");
+      const brewProc = Bun.spawn(["brew", "install", "claude-code"], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      const brewExitCode = await brewProc.exited;
+
+      if (brewExitCode === 0) {
+        console.log(`  ✓ ${this.name} installed via Homebrew`);
+        return;
+      }
+
+      console.log("  Homebrew not available or failed, trying native installer...");
+      installScript = "curl -fsSL https://cdn.jsdelivr.net/npm/@anthropic-ai/claude-code/install.sh | bash";
+    } else {
+      // Linux and other: Use native installer
+      installScript = "curl -fsSL https://cdn.jsdelivr.net/npm/@anthropic-ai/claude-code/install.sh | bash";
+    }
+
+    const proc = Bun.spawn(["bash", "-c", installScript], {
       stdout: "inherit",
       stderr: "inherit",
     });
