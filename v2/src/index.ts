@@ -263,13 +263,31 @@ async function configureBunPath() {
   const bunPath = `${process.env.HOME}/.bun/bin`;
   const pathLine = `export PATH="${bunPath}:$PATH"`;
 
-  // List of shell config files to try, in order of preference
-  const shellConfigs = [
-    `${process.env.HOME}/.zshrc`,
-    `${process.env.HOME}/.bashrc`,
-    `${process.env.HOME}/.bash_profile`,
-    `${process.env.HOME}/.profile`,
-  ];
+  // Map shells to their config files
+  const shellConfigs: Record<string, string[]> = {
+    zsh: [`${process.env.HOME}/.zshrc`],
+    bash: [
+      `${process.env.HOME}/.bashrc`,
+      `${process.env.HOME}/.bash_profile`,
+    ],
+    sh: [`${process.env.HOME}/.profile`],
+  };
+
+  // Detect current shell and build config priority list
+  const currentShell = process.env.SHELL?.split("/").pop() || "bash";
+  const priorityConfigs = shellConfigs[currentShell] || shellConfigs.bash;
+
+  // Add fallback configs (ones not in priority list)
+  const allFallbackConfigs: string[] = [];
+  for (const configs of Object.values(shellConfigs)) {
+    for (const config of configs) {
+      if (!priorityConfigs.includes(config)) {
+        allFallbackConfigs.push(config);
+      }
+    }
+  }
+
+  const allConfigs = [...priorityConfigs, ...allFallbackConfigs];
 
   // First, try /etc/environment (system-wide, requires sudo)
   const envFile = "/etc/environment";
@@ -297,7 +315,7 @@ async function configureBunPath() {
 
   // If system-wide failed, try shell config files
   if (!configured) {
-    for (const configPath of shellConfigs) {
+    for (const configPath of allConfigs) {
       try {
         // Check if file exists
         const existsProc = Bun.spawn(["test", "-f", configPath], {
