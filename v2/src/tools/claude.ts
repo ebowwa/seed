@@ -31,28 +31,12 @@ export class ClaudeTool extends BaseTool {
     // - Linux: Installs to ~/.local/bin or /usr/local/bin
     // - macOS: Installs to /usr/local/bin (also available via Homebrew)
 
-    let installScript: string;
+    // Install Claude Code using the official installer
+    // Works on macOS, Linux, and WSL
+    const installScript = "curl -fsSL https://claude.ai/install.sh | bash";
 
-    if (env.os === "macos") {
-      // macOS: Try Homebrew first (faster, more reliable), fall back to native installer
-      console.log("  Trying Homebrew installation (macOS)...");
-      const brewProc = Bun.spawn(["brew", "install", "claude-code"], {
-        stdout: "inherit",
-        stderr: "inherit",
-      });
-      const brewExitCode = await brewProc.exited;
-
-      if (brewExitCode === 0) {
-        console.log(`  ✓ ${this.name} installed via Homebrew`);
-        return;
-      }
-
-      console.log("  Homebrew not available or failed, trying native installer...");
-      installScript = "curl -fsSL https://cdn.jsdelivr.net/npm/@anthropic-ai/claude-code/install.sh | bash";
-    } else {
-      // Linux and other: Use native installer
-      installScript = "curl -fsSL https://cdn.jsdelivr.net/npm/@anthropic-ai/claude-code/install.sh | bash";
-    }
+    console.log("  Installing Claude Code via official installer...");
+    console.log("  This works on macOS, Linux, and WSL");
 
     const proc = Bun.spawn(["bash", "-c", installScript], {
       stdout: "inherit",

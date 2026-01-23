@@ -10,8 +10,8 @@ export class NodeTool extends BaseTool {
   description = "Node.js and npm package manager";
 
   async isApplicable(env: Environment): Promise<boolean> {
-    // Node.js is useful for all environments, especially VPS
-    return env.os === "linux";
+    // Node.js is useful for all environments (macOS, Linux, WSL)
+    return true;
   }
 
   async checkInstalled(env: Environment): Promise<boolean> {
@@ -63,9 +63,22 @@ export class NodeTool extends BaseTool {
       }
 
       console.log(`  ✓ ${this.name} installed`);
-    } else {
-      console.log(`  ℹ ${this.name} should be installed via Homebrew on macOS`);
-      console.log(`    Run: brew install node`);
+    } else if (env.os === "macos") {
+      // macOS: Try Homebrew
+      console.log("  Installing Node.js via Homebrew (macOS)...");
+      const brewProc = Bun.spawn(["brew", "install", "node"], {
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      const brewExitCode = await brewProc.exited;
+
+      if (brewExitCode !== 0) {
+        console.log("  ⚠ Homebrew installation failed. Install Node.js manually:");
+        console.log("    brew install node");
+        return;
+      }
+
+      console.log(`  ✓ ${this.name} installed via Homebrew`);
     }
   }
 }
