@@ -261,7 +261,7 @@ function log(
 
 async function configureBunPath() {
   const envFile = "/etc/environment";
-  const bunPath = "/.bun/bin";
+  const bunPath = `${process.env.HOME}/.bun/bin`;
 
   try {
     const content = await Bun.file(envFile).text();
