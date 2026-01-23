@@ -1,0 +1,28 @@
+{
+  "name": "seed-setup-v2",
+  "version": "2.0.0",
+  "description": "Fast, reliable environment setup powered by Bun",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "seed-setup": "src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --compile --outfile seed-setup",
+    "build:linux": "bun build src/index.ts --compile --target=bun-linux-x64 --outfile seed-setup-linux-x64",
+    "build:macos": "bun build src/index.ts --compile --target=bun-darwin-x64 --outfile seed-setup-macos-x64",
+    "build:macos-arm": "bun build src/index.ts --compile --target=bun-darwin-aarch64 --outfile seed-setup-macos-arm64",
+    "build:all": "bun run build:linux && bun run build:macos && bun run build:macos-arm",
+    "test": "bun test",
+    "check": "bun --print 'import(\"./src/index.ts\")'"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {},
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
