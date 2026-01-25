@@ -150,28 +150,69 @@ async function main() {
 
   const timings: Array<{ name: string; ms: number; status: string }> = [];
 
-  for (const tool of toolsToInstall) {
-    if (options.dryRun) {
-      log("dry-run", `Would install: ${tool.name}`);
-      continue;
-    }
+  // Separate bun (must be first) from other tools for parallel install
+  const bunTool = toolsToInstall.find((t) => t.name === "bun");
+  const otherTools = toolsToInstall.filter((t) => t.name !== "bun");
 
+  // Install bun first if present
+  if (bunTool) {
     const toolStart = performance.now();
-
     try {
-      log("info", `Installing ${tool.name}...`);
-      await tool.install(env);
+      log("info", `Installing ${bunTool.name}...`);
+      await bunTool.install(env);
       const toolEnd = performance.now();
       const toolMs = Math.round(toolEnd - toolStart);
-      timings.push({ name: tool.name, ms: toolMs, status: "✓" });
-      log("success", `${tool.name} installed (${toolMs}ms)`);
+      timings.push({ name: bunTool.name, ms: toolMs, status: "✓" });
+      log("success", `${bunTool.name} installed (${toolMs}ms)`);
     } catch (error) {
       const toolEnd = performance.now();
       const toolMs = Math.round(toolEnd - toolStart);
-      timings.push({ name: tool.name, ms: toolMs, status: "✗" });
-      log("error", `${tool.name} failed: ${error}`);
+      timings.push({ name: bunTool.name, ms: toolMs, status: "✗" });
+      log("error", `${bunTool.name} failed: ${error}`);
       if (!options.force) {
         throw error;
+      }
+    }
+  }
+
+  // Install all other tools in parallel
+  if (otherTools.length > 0) {
+    if (options.dryRun) {
+      for (const tool of otherTools) {
+        log("dry-run", `Would install: ${tool.name}`);
+      }
+    } else {
+      // Track start times for each tool
+      const startTimes = new Map(otherTools.map((t) => [t.name, performance.now()]));
+
+      // Install in parallel
+      const installPromises = otherTools.map(async (tool) => {
+        try {
+          log("info", `Installing ${tool.name}...`);
+          await tool.install(env);
+          const toolEnd = performance.now();
+          const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
+          return { name: tool.name, ms: toolMs, status: "✓" };
+        } catch (error) {
+          const toolEnd = performance.now();
+          const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
+          const result = { name: tool.name, ms: toolMs, status: "✗" };
+          log("error", `${tool.name} failed: ${error}`);
+          if (!options.force) {
+            throw error;
+          }
+          return result;
+        }
+      });
+
+      const results = await Promise.all(installPromises);
+      timings.push(...results);
+
+      // Log success messages after all complete
+      for (const result of results) {
+        if (result.status === "✓") {
+          log("success", `${result.name} installed (${result.ms}ms)`);
+        }
       }
     }
   }
