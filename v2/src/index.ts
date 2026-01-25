@@ -150,71 +150,152 @@ async function main() {
 
   const timings: Array<{ name: string; ms: number; status: string }> = [];
 
-  // Separate bun (must be first) from other tools for parallel install
+  // ============================================================================
+  // 4-PHASE PARALLEL INSTALLATION STRATEGY
+  // ============================================================================
+  // Phase 1: curl-based installers (claude, doppler) - no dependencies
+  // Phase 2: bun (verification only, script runs on it)
+  // Phase 3: bun-dependent tools (lane, node-agent) - require bun for build
+  // Phase 4: apt-based tools (node, tmux, gh) - serial due to dpkg lock
+  // ============================================================================
+
+  const curlTools = toolsToInstall.filter((t) =>
+    ["claude", "doppler"].includes(t.name)
+  );
   const bunTool = toolsToInstall.find((t) => t.name === "bun");
-  const otherTools = toolsToInstall.filter((t) => t.name !== "bun");
+  const bunDependentTools = toolsToInstall.filter((t) =>
+    ["lane", "node-agent"].includes(t.name)
+  );
+  const aptTools = toolsToInstall.filter((t) =>
+    ["node", "tmux", "gh"].includes(t.name)
+  );
 
-  // Install bun first if present
-  if (bunTool) {
-    const toolStart = performance.now();
-    try {
-      log("info", `Installing ${bunTool.name}...`);
-      await bunTool.install(env);
-      const toolEnd = performance.now();
-      const toolMs = Math.round(toolEnd - toolStart);
-      timings.push({ name: bunTool.name, ms: toolMs, status: "✓" });
-      log("success", `${bunTool.name} installed (${toolMs}ms)`);
-    } catch (error) {
-      const toolEnd = performance.now();
-      const toolMs = Math.round(toolEnd - toolStart);
-      timings.push({ name: bunTool.name, ms: toolMs, status: "✗" });
-      log("error", `${bunTool.name} failed: ${error}`);
-      if (!options.force) {
-        throw error;
-      }
-    }
-  }
+  // Helper function to run tools in parallel
+  const runToolsParallel = async (tools: Tool[]): Promise<Array<{ name: string; ms: number; status: string }>> => {
+    if (tools.length === 0) return [];
 
-  // Install all other tools in parallel
-  if (otherTools.length > 0) {
     if (options.dryRun) {
-      for (const tool of otherTools) {
+      for (const tool of tools) {
         log("dry-run", `Would install: ${tool.name}`);
       }
-    } else {
-      // Track start times for each tool
-      const startTimes = new Map(otherTools.map((t) => [t.name, performance.now()]));
+      return tools.map(t => ({ name: t.name, ms: 0, status: "○" }));
+    }
 
-      // Install in parallel
-      const installPromises = otherTools.map(async (tool) => {
-        try {
-          log("info", `Installing ${tool.name}...`);
-          await tool.install(env);
-          const toolEnd = performance.now();
-          const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
-          return { name: tool.name, ms: toolMs, status: "✓" };
-        } catch (error) {
-          const toolEnd = performance.now();
-          const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
-          const result = { name: tool.name, ms: toolMs, status: "✗" };
-          log("error", `${tool.name} failed: ${error}`);
-          if (!options.force) {
-            throw error;
-          }
-          return result;
+    const startTimes = new Map(tools.map((t) => [t.name, performance.now()]));
+
+    const installPromises = tools.map(async (tool) => {
+      try {
+        log("info", `Installing ${tool.name}...`);
+        await tool.install(env);
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
+        return { name: tool.name, ms: toolMs, status: "✓" };
+      } catch (error) {
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
+        const result = { name: tool.name, ms: toolMs, status: "✗" };
+        log("error", `${tool.name} failed: ${error}`);
+        if (!options.force) {
+          throw error;
         }
-      });
+        return result;
+      }
+    });
 
-      const results = await Promise.all(installPromises);
-      timings.push(...results);
+    const results = await Promise.all(installPromises);
 
-      // Log success messages after all complete
-      for (const result of results) {
-        if (result.status === "✓") {
-          log("success", `${result.name} installed (${result.ms}ms)`);
+    for (const result of results) {
+      if (result.status === "✓") {
+        log("success", `${result.name} installed (${result.ms}ms)`);
+      }
+    }
+
+    return results;
+  };
+
+  // Helper function to run tools serially
+  const runToolsSerial = async (tools: Tool[]): Promise<Array<{ name: string; ms: number; status: string }>> => {
+    const results: Array<{ name: string; ms: number; status: string }> = [];
+
+    for (const tool of tools) {
+      if (options.dryRun) {
+        log("dry-run", `Would install: ${tool.name}`);
+        results.push({ name: tool.name, ms: 0, status: "○" });
+        continue;
+      }
+
+      const toolStart = performance.now();
+      try {
+        log("info", `Installing ${tool.name}...`);
+        await tool.install(env);
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - toolStart);
+        results.push({ name: tool.name, ms: toolMs, status: "✓" });
+        log("success", `${tool.name} installed (${toolMs}ms)`);
+      } catch (error) {
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - toolStart);
+        results.push({ name: tool.name, ms: toolMs, status: "✗" });
+        log("error", `${tool.name} failed: ${error}`);
+        if (!options.force) {
+          throw error;
         }
       }
     }
+
+    return results;
+  };
+
+  // ============================================================================
+  // PHASE 1: curl-based installers (no dependencies)
+  // Tools: claude, doppler
+  // ============================================================================
+  if (curlTools.length > 0) {
+    const phaseStart = performance.now();
+    log("info", `Phase 1: Installing ${curlTools.length} curl-based tools in parallel...`);
+    const results = await runToolsParallel(curlTools);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 1 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
+  }
+
+  // ============================================================================
+  // PHASE 2: bun (verification only)
+  // Tools: bun
+  // ============================================================================
+  if (bunTool) {
+    const phaseStart = performance.now();
+    log("info", `Phase 2: Verifying bun...`);
+    const results = await runToolsSerial([bunTool]);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 2 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
+  }
+
+  // ============================================================================
+  // PHASE 3: bun-dependent tools (require bun for build/install)
+  // Tools: lane, node-agent
+  // ============================================================================
+  if (bunDependentTools.length > 0) {
+    const phaseStart = performance.now();
+    log("info", `Phase 3: Installing ${bunDependentTools.length} bun-dependent tools in parallel...`);
+    const results = await runToolsParallel(bunDependentTools);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 3 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
+  }
+
+  // ============================================================================
+  // PHASE 4: apt-based tools (serial due to dpkg lock)
+  // Tools: node, tmux, gh
+  // ============================================================================
+  if (aptTools.length > 0) {
+    const phaseStart = performance.now();
+    log("info", `Phase 4: Installing ${aptTools.length} apt-based tools serially...`);
+    const results = await runToolsSerial(aptTools);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 4 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
   }
 
   // Run health check
