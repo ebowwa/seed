@@ -62,17 +62,8 @@ export class NodeAgentTool extends BaseTool {
       return;
     }
 
-    // Prompt in interactive mode
-    const shouldInstall = await this.prompt(
-      `Install ${this.name}? (Ralph Loop orchestration API server)`
-    );
-
-    if (!shouldInstall) {
-      console.log(`  ⊘ Skipping ${this.name}`);
-      return;
-    }
-
-    console.log(`  Installing ${this.name}...`);
+    // Auto-install node-agent (always yes)
+    console.log(`  ✓ Auto-installing ${this.name}...`);
 
     // Install dependencies
     console.log(`  → Installing dependencies...`);
