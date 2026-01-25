@@ -120,4 +120,67 @@ fi
 cd "${V2_DIR}"
 
 # Run the setup
-exec bun run src/index.ts "$@"
+bun run src/index.ts "$@"
+SETUP_EXIT_CODE=$?
+
+# If setup failed, exit
+if [ $SETUP_EXIT_CODE -ne 0 ]; then
+    exit $SETUP_EXIT_CODE
+fi
+
+# ============================================================================
+# Node Agent Systemd Service Setup
+# ============================================================================
+
+print_info "Checking node-agent service..."
+
+NODE_AGENT_PATH="${SCRIPT_DIR}/node-agent"
+SERVICE_FILE="${NODE_AGENT_PATH}/systemd/node-agent.service"
+
+# Check if node-agent exists and has service file
+if [ -d "${NODE_AGENT_PATH}" ] && [ -f "${SERVICE_FILE}" ]; then
+    print_info "Setting up node-agent systemd service..."
+
+    # Detect user
+    CURRENT_USER="${USER:-root}"
+    SERVICE_USER="${SUDO_USER:-$CURRENT_USER}"
+
+    # Systemd directory
+    SYSTEMD_DIR="/etc/systemd/system"
+
+    # Copy and configure service file
+    print_info "Installing systemd service file..."
+    sudo cp "${SERVICE_FILE}" "${SYSTEMD_DIR}/node-agent.service"
+
+    # Update user in service file
+    sudo sed -i "s/User=ubuntu/User=${SERVICE_USER}/g" "${SYSTEMD_DIR}/node-agent.service"
+    sudo sed -i "s|/home/ubuntu/|/home/${SERVICE_USER}/|g" "${SYSTEMD_DIR}/node-agent.service"
+
+    # Create required directories
+    BASE_PATH="${HOME:-/root}"
+    sudo mkdir -p "${BASE_PATH}/repos"
+    sudo mkdir -p "${BASE_PATH}/.node-agent/pids"
+    sudo mkdir -p "${BASE_PATH}/.node-agent/logs"
+
+    # Set ownership (if not root)
+    if [ "$(id -u)" -ne 0 ]; then
+        sudo chown -R "${SERVICE_USER}:${SERVICE_USER}" "${BASE_PATH}"
+    fi
+
+    # Reload and start service
+    print_info "Reloading systemd and starting service..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable node-agent.service
+    sudo systemctl start node-agent.service
+
+    # Check service status
+    sleep 2
+    if sudo systemctl is-active --quiet node-agent.service; then
+        print_success "node-agent service is running"
+    else
+        print_error "node-agent service failed to start"
+        sudo systemctl status node-agent.service --no-pager || true
+    fi
+else
+    print_warning "node-agent or service file not found, skipping systemd setup"
+fi
