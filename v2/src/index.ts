@@ -382,8 +382,38 @@ function log(
 }
 
 async function configureBunPath() {
+  const bunPath = `${process.env.HOME}/.bun/bin`;
+  const pathLine = `export PATH="${bunPath}:$PATH"`;
+
+  // Map shells to their config files
+  const shellConfigs: Record<string, string[]> = {
+    zsh: [`${process.env.HOME}/.zshrc`],
+    bash: [
+      `${process.env.HOME}/.bashrc`,
+      `${process.env.HOME}/.bash_profile`,
+    ],
+    sh: [`${process.env.HOME}/.profile`],
+  };
+
+  // Detect current shell and build config priority list
+  const currentShell = process.env.SHELL?.split("/").pop() || "bash";
+  const priorityConfigs = shellConfigs[currentShell] || shellConfigs.bash;
+
+  // Add fallback configs (ones not in priority list)
+  const allFallbackConfigs: string[] = [];
+  for (const configs of Object.values(shellConfigs)) {
+    for (const config of configs) {
+      if (!priorityConfigs.includes(config)) {
+        allFallbackConfigs.push(config);
+      }
+    }
+  }
+
+  const allConfigs = [...priorityConfigs, ...allFallbackConfigs];
+
+  // First, try /etc/environment (system-wide, requires sudo)
   const envFile = "/etc/environment";
-  const bunPath = "/.bun/bin";
+  let configured = false;
 
   try {
     const content = await Bun.file(envFile).text();
@@ -392,8 +422,7 @@ async function configureBunPath() {
       return;
     }
   } catch {
-    log("info", "Could not read /etc/environment (may not exist or no permission)");
-    return;
+    // /etc/environment not readable, try shell configs
   }
 
   try {
@@ -401,8 +430,45 @@ async function configureBunPath() {
     const updated = content.trim() + `\nPATH="${bunPath}:$PATH"\n`;
     await Bun.write(envFile, updated);
     log("success", `Added bun PATH to ${envFile}`);
+    configured = true;
   } catch {
-    log("warning", `Could not write to ${envFile} (permission denied)`);
+    // No sudo or write failed, continue to shell configs
+  }
+
+  // If system-wide failed, try shell config files
+  if (!configured) {
+    for (const configPath of allConfigs) {
+      try {
+        // Check if file exists
+        const existsProc = Bun.spawn(["test", "-f", configPath], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const exitCode = await existsProc.exited;
+
+        let content = "";
+        if (exitCode === 0) {
+          content = await Bun.file(configPath).text();
+          // Check if already configured
+          if (content.includes(bunPath)) {
+            log("info", `Bun PATH already configured in ${configPath}`);
+            return;
+          }
+        }
+
+        // Append PATH configuration
+        const updated = content.trim() + `\n${pathLine}\n`;
+        await Bun.write(configPath, updated);
+        log("success", `Added bun PATH to ${configPath}`);
+        return;
+      } catch {
+        // Try next config file
+        continue;
+      }
+    }
+
+    log("warning", "Could not configure bun PATH in any shell config");
+    log("info", `Add this to your shell config: export PATH="${bunPath}:$PATH"`);
   }
 }
 
