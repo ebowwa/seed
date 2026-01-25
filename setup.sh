@@ -138,7 +138,8 @@ NODE_AGENT_PATH="${SCRIPT_DIR}/node-agent"
 SERVICE_FILE="${NODE_AGENT_PATH}/systemd/node-agent.service"
 
 # Check if systemd is available (not in containers)
-if ! command -v systemctl &> /dev/null || ! systemctl --version &> /dev/null; then
+# Use 'systemctl is-system-running' to verify systemd is actually running
+if ! command -v systemctl &> /dev/null || ! systemctl is-system-running &> /dev/null 2>&1; then
     # No systemd - check if node-agent is already running
     if pgrep -f "node-agent" > /dev/null; then
         print_success "node-agent service is running (managed directly)"
