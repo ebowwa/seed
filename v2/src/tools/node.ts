@@ -31,6 +31,18 @@ export class NodeTool extends BaseTool {
         return;
       }
 
+      // Remove problematic Yarn repository if it exists (expired GPG key)
+      const yarnSource = "/etc/apt/sources.list.d/yarn.list";
+      const removeYarnCmd = env.isRoot
+        ? ["rm", "-f", yarnSource]
+        : ["sudo", "rm", "-f", yarnSource];
+
+      console.log("  Removing problematic Yarn repository (if exists)...");
+      Bun.spawn(removeYarnCmd, {
+        stdout: "inherit",
+        stderr: "inherit",
+      }).exited;
+
       // Update package list and install Node.js and npm
       const updateCmd = env.isRoot
         ? ["apt-get", "update", "-qq"]
