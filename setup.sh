@@ -140,17 +140,27 @@ SERVICE_FILE="${NODE_AGENT_PATH}/systemd/node-agent.service"
 # Check if systemd is available (not in containers)
 # Use 'systemctl is-system-running' to verify systemd is actually running
 if ! command -v systemctl &> /dev/null || ! systemctl is-system-running &> /dev/null 2>&1; then
-    # No systemd - check if node-agent is already running
-    if pgrep -f "node-agent" > /dev/null; then
-        print_success "node-agent service is running (managed directly)"
+    # No systemd - check if node-agent port is listening (more reliable than pgrep)
+    if nc -z localhost 8911 2>/dev/null || ss -ln | grep -q ':8911'; then
+        print_success "node-agent service is running on port 8911 (managed directly)"
     else
         print_warning "systemd not available (container environment), starting node-agent directly..."
-        cd "${NODE_AGENT_PATH}" && bun run src/index.ts &
-        sleep 2
-        if pgrep -f "node-agent" > /dev/null; then
-            print_success "node-agent started successfully (listening on port 8911)"
+
+        # Start node-agent with proper logging
+        cd "${NODE_AGENT_PATH}"
+        nohup bun run src/index.ts > "${NODE_AGENT_PATH}/node-agent.log" 2>&1 &
+        AGENT_PID=$!
+        echo $AGENT_PID > "${NODE_AGENT_PATH}/node-agent.pid"
+
+        # Wait for startup
+        sleep 3
+
+        # Check if port is listening (reliable check)
+        if nc -z localhost 8911 2>/dev/null || ss -ln | grep -q ':8911'; then
+            print_success "node-agent started successfully (PID: $AGENT_PID, port 8911)"
         else
-            print_error "node-agent failed to start"
+            print_error "node-agent failed to start (check ${NODE_AGENT_PATH}/node-agent.log)"
+            cat "${NODE_AGENT_PATH}/node-agent.log" 2>/dev/null || true
         fi
     fi
 # Check if node-agent exists and has service file
