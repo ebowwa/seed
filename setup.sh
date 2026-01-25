@@ -137,8 +137,23 @@ print_info "Checking node-agent service..."
 NODE_AGENT_PATH="${SCRIPT_DIR}/node-agent"
 SERVICE_FILE="${NODE_AGENT_PATH}/systemd/node-agent.service"
 
+# Check if systemd is available (not in containers)
+if ! command -v systemctl &> /dev/null || ! systemctl --version &> /dev/null; then
+    # No systemd - check if node-agent is already running
+    if pgrep -f "node-agent" > /dev/null; then
+        print_success "node-agent service is running (managed directly)"
+    else
+        print_warning "systemd not available (container environment), starting node-agent directly..."
+        cd "${NODE_AGENT_PATH}" && bun run src/index.ts &
+        sleep 2
+        if pgrep -f "node-agent" > /dev/null; then
+            print_success "node-agent started successfully (listening on port 8911)"
+        else
+            print_error "node-agent failed to start"
+        fi
+    fi
 # Check if node-agent exists and has service file
-if [ -d "${NODE_AGENT_PATH}" ] && [ -f "${SERVICE_FILE}" ]; then
+elif [ -d "${NODE_AGENT_PATH}" ] && [ -f "${SERVICE_FILE}" ]; then
     print_info "Setting up node-agent systemd service..."
 
     # Detect user
