@@ -138,8 +138,8 @@ NODE_AGENT_PATH="${SCRIPT_DIR}/node-agent"
 SERVICE_FILE="${NODE_AGENT_PATH}/systemd/node-agent.service"
 
 # Check if systemd is available (not in containers)
-# Use 'systemctl is-system-running' to verify systemd is actually running
-if ! command -v systemctl &> /dev/null || ! systemctl is-system-running &> /dev/null 2>&1; then
+# Check for systemd runtime directory - most reliable indicator
+if [ ! -d /run/systemd/system ]; then
     # No systemd - check if node-agent port is listening (more reliable than pgrep)
     if nc -z localhost 8911 2>/dev/null || ss -ln | grep -q ':8911'; then
         print_success "node-agent service is running on port 8911 (managed directly)"
