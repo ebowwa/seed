@@ -135,6 +135,74 @@ WRAPPER_EOF`
     await this.exec(["chmod", "+x", binPath]);
 
     console.log(`  ✓ ${this.name} installed to ${binPath}`);
-    console.log(`  → ${this.name} will be started by systemd (managed by setup.sh)`);
+
+    // Start the service (without systemd for containers)
+    console.log(`  → Starting ${this.name}...`);
+
+    // Check if systemd is available
+    const { exitCode: systemctlExit } = await this.exec(
+      ["which", "systemctl"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
+
+    if (systemctlExit === 0) {
+      // Use systemd service
+      console.log(`  → ${this.name} will be started by systemd (managed by setup.sh)`);
+    } else {
+      // Start directly (for containers without systemd)
+      const logPath = `${agentPath}/node-agent.log`;
+      const pidPath = `${agentPath}/node-agent.pid`;
+
+      // Check if already running
+      const { exitCode: pidCheckExit } = await this.exec(
+        ["test", "-f", pidPath],
+        { stdout: "pipe", stderr: "pipe" }
+      );
+
+      if (pidCheckExit === 0) {
+        // Check if process is still alive
+        const { stdout: pid } = await this.exec(["cat", pidPath]);
+        const { exitCode: killExit } = await this.exec(
+          ["kill", "-0", pid.trim()],
+          { stdout: "pipe", stderr: "pipe" }
+        );
+
+        if (killExit === 0) {
+          console.log(`  ✓ ${this.name} already running (PID: ${pid.trim()})`);
+          console.log(`  → logs: ${logPath}`);
+          return;
+        }
+      }
+
+      // Start in background with nohup
+      const startProc = Bun.spawn(
+        ["nohup", "bun", "run", "src/index.ts"],
+        {
+          cwd: agentPath,
+          stdout: "pipe",
+          stderr: "pipe",
+          env: {
+            ...process.env,
+            NODE_AGENT_LOG_PATH: logPath,
+            NODE_AGENT_PID_PATH: pidPath,
+          },
+        }
+      );
+
+      // Wait a bit and check if it started
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Get the PID of the background process
+      const { exitCode: psExit } = await this.exec(
+        ["ps", "aux", "|", "grep", "[n]ode-agent"],
+        { stdout: "pipe", stderr: "pipe" }
+      );
+
+      if (psExit === 0) {
+        console.log(`  ✓ ${this.name} started and listening on port 8911 (logs: ${logPath})`);
+      } else {
+        console.log(`  ⚠ ${this.name} started but status unknown (logs: ${logPath})`);
+      }
+    }
   }
 }

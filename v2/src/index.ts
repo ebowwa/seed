@@ -174,16 +174,34 @@ async function main() {
   const runToolsParallel = async (tools: Tool[]): Promise<Array<{ name: string; ms: number; status: string }>> => {
     if (tools.length === 0) return [];
 
-    if (options.dryRun) {
-      for (const tool of tools) {
-        log("dry-run", `Would install: ${tool.name}`);
+    // Filter out already installed tools
+    const toolsToInstall: Tool[] = [];
+    const alreadyInstalled: Tool[] = [];
+
+    for (const tool of tools) {
+      if (await tool.checkInstalled(env)) {
+        log("info", `✓ ${tool.name} already installed, skipping`);
+        alreadyInstalled.push(tool);
+      } else {
+        toolsToInstall.push(tool);
       }
-      return tools.map(t => ({ name: t.name, ms: 0, status: "○" }));
     }
 
-    const startTimes = new Map(tools.map((t) => [t.name, performance.now()]));
+    // Add already installed to timings with 0ms
+    const installedResults = alreadyInstalled.map(t => ({ name: t.name, ms: 0, status: "⊘" }));
 
-    const installPromises = tools.map(async (tool) => {
+    if (toolsToInstall.length === 0) return installedResults;
+
+    if (options.dryRun) {
+      for (const tool of toolsToInstall) {
+        log("dry-run", `Would install: ${tool.name}`);
+      }
+      return [...installedResults, ...toolsToInstall.map(t => ({ name: t.name, ms: 0, status: "○" }))];
+    }
+
+    const startTimes = new Map(toolsToInstall.map((t) => [t.name, performance.now()]));
+
+    const installPromises = toolsToInstall.map(async (tool) => {
       try {
         log("info", `Installing ${tool.name}...`);
         await tool.install(env);
@@ -210,7 +228,7 @@ async function main() {
       }
     }
 
-    return results;
+    return [...installedResults, ...results];
   };
 
   // Helper function to run tools serially
@@ -218,6 +236,13 @@ async function main() {
     const results: Array<{ name: string; ms: number; status: string }> = [];
 
     for (const tool of tools) {
+      // Skip if already installed
+      if (await tool.checkInstalled(env)) {
+        log("info", `✓ ${tool.name} already installed, skipping`);
+        results.push({ name: tool.name, ms: 0, status: "⊘" });
+        continue;
+      }
+
       if (options.dryRun) {
         log("dry-run", `Would install: ${tool.name}`);
         results.push({ name: tool.name, ms: 0, status: "○" });
