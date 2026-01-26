@@ -171,6 +171,13 @@ elif [ -d "${NODE_AGENT_PATH}" ] && [ -f "${SERVICE_FILE}" ]; then
     CURRENT_USER="${USER:-root}"
     SERVICE_USER="${SUDO_USER:-$CURRENT_USER}"
 
+    # Detect home directory (root is special case)
+    if [ "${SERVICE_USER}" = "root" ]; then
+        SERVICE_HOME="/root"
+    else
+        SERVICE_HOME="/home/${SERVICE_USER}"
+    fi
+
     # Systemd directory
     SYSTEMD_DIR="/etc/systemd/system"
 
@@ -178,9 +185,19 @@ elif [ -d "${NODE_AGENT_PATH}" ] && [ -f "${SERVICE_FILE}" ]; then
     print_info "Installing systemd service file..."
     sudo cp "${SERVICE_FILE}" "${SYSTEMD_DIR}/node-agent.service"
 
-    # Update user in service file
+    # Update user and group in service file
     sudo sed -i "s/User=ubuntu/User=${SERVICE_USER}/g" "${SYSTEMD_DIR}/node-agent.service"
-    sudo sed -i "s|/home/ubuntu/|/home/${SERVICE_USER}/|g" "${SYSTEMD_DIR}/node-agent.service"
+    sudo sed -i "s/Group=ubuntu/Group=${SERVICE_USER}/g" "${SYSTEMD_DIR}/node-agent.service"
+
+    # Update paths in service file - use actual NODE_AGENT_PATH for WorkingDirectory
+    sudo sed -i "s|WorkingDirectory=/home/ubuntu/seed/node-agent|WorkingDirectory=${NODE_AGENT_PATH}|g" "${SYSTEMD_DIR}/node-agent.service"
+    sudo sed -i "s|ExecStart=/home/ubuntu/.bun/bin/bun|ExecStart=${HOME}/.bun/bin/bun|g" "${SYSTEMD_DIR}/node-agent.service"
+    sudo sed -i "s|EnvironmentFile=-/home/ubuntu/seed/node-agent/.env|EnvironmentFile=-${NODE_AGENT_PATH}/.env|g" "${SYSTEMD_DIR}/node-agent.service"
+
+    # Update ReadWritePaths
+    sudo sed -i "s|ReadWritePaths=/home/ubuntu/seed/node-agent|ReadWritePaths=${NODE_AGENT_PATH}|g" "${SYSTEMD_DIR}/node-agent.service"
+    sudo sed -i "s|ReadWritePaths=/home/ubuntu/repos|ReadWritePaths=${SERVICE_HOME}/repos|g" "${SYSTEMD_DIR}/node-agent.service"
+    sudo sed -i "s|ReadWritePaths=/home/ubuntu/.node-agent|ReadWritePaths=${SERVICE_HOME}/.node-agent|g" "${SYSTEMD_DIR}/node-agent.service"
 
     # Create required directories
     BASE_PATH="${HOME:-/root}"
