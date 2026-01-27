@@ -79,6 +79,15 @@ export class RalphService {
         const currentSubtaskId = state.slam?.currentSubtask;
         const currentSubtask = subtasks.find((st) => st.id === currentSubtaskId);
 
+        // Get project directory (parent of .claude folder)
+        const projectDir = path.dirname(path.dirname(filePath));
+        const homeDir = process.env.HOME || "";
+        // Format as relative path: ~/seed or ~/seed/worktrees/feature-x
+        let projectPath = projectDir;
+        if (projectDir.startsWith(homeDir)) {
+          projectPath = "~" + projectDir.slice(homeDir.length);
+        }
+
         loops.push({
           id,
           worktree_id: projectName,
@@ -89,6 +98,7 @@ export class RalphService {
           completion_promise: state.promise || null,
           started_at: state.startTime,
           last_activity: state.lastUpdate,
+          project_path: projectPath,
           // Ralph Iterative specific fields
           phase: state.slam?.phase,
           current_task: currentSubtask?.title || state.slam?.state?.currentTask,

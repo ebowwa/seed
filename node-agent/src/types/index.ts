@@ -38,6 +38,7 @@ export interface RalphLoop {
   last_activity?: string;
   recent_commits?: RalphLoopCommit[];
   error_message?: string;
+  project_path?: string; // Relative path like ~/seed or ~/seed/worktrees/feature-x
   // Ralph Iterative specific fields
   phase?: "planning" | "executing" | "review" | "complete";
   current_task?: string | null;
