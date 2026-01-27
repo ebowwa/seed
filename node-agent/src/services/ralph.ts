@@ -47,6 +47,9 @@ export class RalphService {
    * Scans for:
    * 1. .claude/.ralph-iterative.*.json files (new Ralph Iterative skill)
    * 2. .claude/ralph-loop.local.md files (legacy format)
+   *
+   * TODO: Add caching for Ralph state files to avoid repeated disk reads
+   * TODO: Consider using fs.watch() for real-time updates instead of polling
    */
   async listRalphLoops(): Promise<RalphLoop[]> {
     const loops: RalphLoop[] = [];
@@ -70,6 +73,27 @@ export class RalphService {
         // Generate ID from project name and file path
         const id = `${projectName}-${state.iteration}`;
 
+        // Extract subtask info
+        const subtasks = state.slam?.subtasks || [];
+        const totalSubtasks = subtasks.length;
+        const completedSubtasks = state.slam?.completedSubtasks?.length || 0;
+
+        // Find current subtask
+        const currentSubtaskId = state.slam?.currentSubtask;
+        const currentSubtask = subtasks.find((st) => st.id === currentSubtaskId);
+
+        // Get project directory (parent of .claude folder)
+        const projectDir = path.dirname(path.dirname(filePath));
+        const homeDir = process.env.HOME || "";
+        // Format as relative path: ~/seed or ~/seed/worktrees/feature-x
+        let projectPath = projectDir;
+        if (projectDir.startsWith(homeDir)) {
+          projectPath = "~" + projectDir.slice(homeDir.length);
+        }
+
+        // Get git info (remote and branch)
+        const gitInfo = await this.getGitInfo(projectDir);
+
         loops.push({
           id,
           worktree_id: projectName,
@@ -80,6 +104,18 @@ export class RalphService {
           completion_promise: state.promise || null,
           started_at: state.startTime,
           last_activity: state.lastUpdate,
+          project_path: projectPath,
+          git_info: gitInfo,
+          // Ralph Iterative specific fields
+          phase: state.slam?.phase,
+          current_task: currentSubtask?.title || state.slam?.state?.currentTask,
+          total_subtasks: totalSubtasks,
+          completed_subtasks: completedSubtasks,
+          subtasks: subtasks.map((st) => ({
+            id: st.id,
+            title: st.title,
+            status: st.status,
+          })),
         });
       } catch {
         // Invalid JSON or other error, skip
@@ -210,7 +246,10 @@ export class RalphService {
   }
 
   /**
-   * Start a new Ralph loop
+   * Start a new Ralph loop using Ralph Iterative format
+   *
+   * Creates .claude/.ralph-iterative.local.json with SLAM state
+   * and spawns Claude Code which will detect the file and start iterating.
    */
   async startRalphLoop(request: CreateRalphLoopRequest): Promise<RalphLoop> {
     const worktrees = await this.gitService.listWorktrees();
@@ -221,9 +260,13 @@ export class RalphService {
     }
 
     const loopId = worktree.id;
-    const stateFile = path.join(worktree.path, ".claude", "ralph-loop.local.md");
     const pidFile = path.join(PIDS_DIR, `${loopId}.pid`);
     const logFile = path.join(LOGS_DIR, `${loopId}.log`);
+    const stateFilePath = path.join(
+      worktree.path,
+      ".claude",
+      ".ralph-iterative.local.json",
+    );
 
     // Check if already running
     if (await this.fileExists(pidFile)) {
@@ -233,25 +276,97 @@ export class RalphService {
       }
     }
 
-    // Create Ralph loop state file
-    const stateContent: RalphLoopStateFile = {
-      active: true,
-      iteration: 0,
-      max_iterations: request.max_iterations || 0,
-      completion_promise: request.completion_promise || null,
-      started_at: new Date().toISOString(),
+    // Check if state file already exists (Ralph Iterative session already active)
+    if (await this.fileExists(stateFilePath)) {
+      throw new Error("RALPH_ITERATIVE_ALREADY_ACTIVE");
+    }
+
+    // Detect machine resources
+    const machineInfo = await this.detectMachineResources();
+
+    // Create Ralph Iterative state file
+    const now = new Date().toISOString();
+    const stateContent = {
       prompt: request.prompt,
+      promise: request.completion_promise || "TASK_COMPLETE",
+      iteration: 0,
+      startTime: now,
+      lastUpdate: now,
+      tokens: {
+        totalInput: 0,
+        totalOutput: 0,
+        byIteration: [],
+      },
+      filesChanged: [],
+      workMemory: {
+        completedFiles: [],
+        fileChecksums: {},
+      },
+      machine: machineInfo,
+      git: {
+        enabled: request.auto_commit || request.auto_pr || false,
+        autoCommit: request.auto_commit || request.auto_pr || false,
+        autoPR: request.auto_pr || false,
+        baseBranch: request.base_branch || "main",
+        useLane: false,
+        useWorktree: true,
+        laneName: "",
+        lanePath: "",
+        laneCreated: false,
+        branchCreated: false,
+        branchName: "",
+        currentCommit: "",
+      },
+      slam: {
+        enabled: request.enable_subagents || false,
+        phase: "planning",
+        state: {
+          currentTask: request.prompt,
+          beliefs: {},
+          goals: [request.completion_promise || "TASK_COMPLETE"],
+        },
+        subtasks: [],
+        currentSubtask: null,
+        completedSubtasks: [],
+        memory: {
+          actionsTaken: [],
+          outcomes: {},
+          patterns: {},
+        },
+      },
+      subagents: {
+        enabled: request.enable_subagents || false,
+        available: [
+          "planner",
+          "executor",
+          "reviewer",
+          "fixer",
+          "git",
+          "reporter",
+          "paranoid",
+          "healer",
+          "manager",
+        ],
+        active: [],
+      },
     };
 
-    const stateFileContent = this.formatStateFile(stateContent);
-    await fsp.writeFile(stateFile, stateFileContent);
+    // Ensure .claude directory exists
+    const claudeDir = path.join(worktree.path, ".claude");
+    await fsp.mkdir(claudeDir, { recursive: true });
 
-    // Create .claude/settings.local.json with permissions
+    // Write Ralph Iterative state file
+    await fsp.writeFile(
+      stateFilePath,
+      JSON.stringify(stateContent, null, 2),
+    );
+
+    // Create .claude/settings.local.json with Ralph Iterative permissions
     const settingsFile = path.join(worktree.path, ".claude", "settings.local.json");
     const settingsContent = {
       permissions: {
         allow: [
-          "Skill(ralph-loop:ralph-loop)",
+          "Skill(ralph-iterative:ralph-iterative)",
           "Bash(git:*)",
           "Bash(bun:*)",
           "Bash(npm:*)",
@@ -299,7 +414,7 @@ export class RalphService {
     this.processes.set(loopId, child.pid);
 
     // Log the start
-    const logEntry = `[${new Date().toISOString()}] Started Ralph loop with PID: ${child.pid}\n`;
+    const logEntry = `[${new Date().toISOString()}] Started Ralph Iterative loop with PID: ${child.pid}\n`;
     await fsp.appendFile(logFile, logEntry);
 
     return {
@@ -308,9 +423,9 @@ export class RalphService {
       status: "running",
       prompt: request.prompt,
       iteration: 0,
-      max_iterations: request.max_iterations || 0,
+      max_iterations: 0,
       completion_promise: request.completion_promise || null,
-      started_at: stateContent.started_at,
+      started_at: now,
       process_id: child.pid,
     };
   }
@@ -440,6 +555,163 @@ ${state.prompt}
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Get git remote and branch info for a directory
+   */
+  private async getGitInfo(projectDir: string): Promise<{
+    remote: string | null;
+    branch: string | null;
+  }> {
+    try {
+      // Get current branch
+      let branch: string | null = null;
+      try {
+        const { stdout: branchOutput } = await execAsync(
+          `cd "${projectDir}" && git rev-parse --abbrev-ref HEAD`,
+        );
+        branch = branchOutput.trim() || null;
+      } catch {
+        branch = null;
+      }
+
+      // Get remote URL (origin)
+      let remote: string | null = null;
+      try {
+        const { stdout: remoteOutput } = await execAsync(
+          `cd "${projectDir}" && git config --get remote.origin.url`,
+        );
+        const remoteUrl = remoteOutput.trim();
+        // Extract owner/repo from URL (handles both https and ssh)
+        // https://github.com/ebowwa/seed.git -> ebowwa/seed
+        // git@github.com:ebowwa/seed.git -> ebowwa/seed
+        const match = remoteUrl.match(/[:/]([^\/]+\/[^\/\.]+)(\.git)?$/);
+        remote = match ? match[1] : remoteUrl || null;
+      } catch {
+        remote = null;
+      }
+
+      return { remote, branch };
+    } catch {
+      return { remote: null, branch: null };
+    }
+  }
+
+  /**
+   * Detect machine resources for Ralph Iterative SLAM
+   */
+  private async detectMachineResources(): Promise<{
+    cpu: { count: number; model: string; tier: string };
+    memory: { total: number; free: number; tier: string };
+    disk: { total: number; available: number; tier: string };
+    platform: { os: string; arch: string; isContainer: boolean };
+    capacity: string;
+    score: number;
+  }> {
+    const os = require("os");
+
+    // CPU info
+    const cpuCount = os.cpus().length;
+    const cpuModel = os.cpus()[0]?.model || "Unknown";
+    let cpuTier = "low";
+    if (cpuCount >= 16) cpuTier = "high";
+    else if (cpuCount >= 8) cpuTier = "medium";
+
+    // Memory info (in GB)
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const totalMemGB = Math.round(totalMem / (1024 ** 3));
+    let memTier = "low";
+    if (totalMemGB >= 32) memTier = "high";
+    else if (totalMemGB >= 16) memTier = "medium";
+
+    // Disk info
+    let diskTotal = 0;
+    let diskAvailable = 0;
+    let diskTier = "low";
+    try {
+      const { stdout: dfOutput } = await execAsync("df -h / | tail -1");
+      const parts = dfOutput.trim().split(/\s+/);
+      // Parse size (e.g., "100G" -> 100 GB)
+      const sizeStr = parts[1];
+      const availStr = parts[3];
+      diskTotal = this.parseSizeToGB(sizeStr);
+      diskAvailable = this.parseSizeToGB(availStr);
+      if (diskTotal >= 500) diskTier = "high";
+      else if (diskTotal >= 200) diskTier = "medium";
+    } catch {
+      // Fallback values
+      diskTotal = 100;
+      diskAvailable = 50;
+    }
+
+    // Platform info
+    const platform = {
+      os: os.type(),
+      arch: os.arch(),
+      isContainer: await this.checkIfContainer(),
+    };
+
+    // Calculate capacity score (0-100)
+    const cpuScore = Math.min((cpuCount / 32) * 30, 30);
+    const memScore = Math.min((totalMemGB / 128) * 30, 30);
+    const diskScore = Math.min((diskTotal / 1000) * 20, 20);
+    const bonusScore = platform.isContainer ? 10 : 5;
+    const score = Math.round(cpuScore + memScore + diskScore + bonusScore);
+
+    // Capacity tier
+    let capacity = "low";
+    if (score >= 70) capacity = "high";
+    else if (score >= 40) capacity = "medium";
+
+    return {
+      cpu: { count: cpuCount, model: cpuModel, tier: cpuTier },
+      memory: { total: totalMemGB, free: Math.round(freeMem / (1024 ** 3)), tier: memTier },
+      disk: { total: diskTotal, available: diskAvailable, tier: diskTier },
+      platform,
+      capacity,
+      score,
+    };
+  }
+
+  /**
+   * Check if running in a container
+   */
+  private async checkIfContainer(): Promise<boolean> {
+    try {
+      // Check for Docker/.dockerenv
+      await execAsync("test -f /.dockerenv");
+      return true;
+    } catch {
+      // Not Docker, check for containerd cgroup
+      try {
+        const { stdout } = await execAsync("cat /proc/1/cgroup");
+        return stdout.includes("docker") || stdout.includes("containerd");
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Parse size string to GB (e.g., "100G" -> 100, "500M" -> 0.5)
+   */
+  private parseSizeToGB(sizeStr: string): number {
+    const match = sizeStr.match(/^([\d.]+)([KMGT]?)(i?B?)?$/i);
+    if (!match) return 0;
+
+    const value = parseFloat(match[1]);
+    const unit = match[2].toUpperCase();
+
+    switch (unit) {
+      case "T": return value * 1024;
+      case "G": return value;
+      case "M": return value / 1024;
+      case "K": return value / (1024 * 1024);
+      default: return value;
     }
   }
 }

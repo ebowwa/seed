@@ -38,6 +38,21 @@ export interface RalphLoop {
   last_activity?: string;
   recent_commits?: RalphLoopCommit[];
   error_message?: string;
+  project_path?: string; // Relative path like ~/seed or ~/seed/worktrees/feature-x
+  git_info?: {
+    remote: string | null; // e.g., "origin" or "ebowwa/seed"
+    branch: string | null; // e.g., "Bun-port" or "main"
+  };
+  // Ralph Iterative specific fields
+  phase?: "planning" | "executing" | "review" | "complete";
+  current_task?: string | null;
+  total_subtasks?: number;
+  completed_subtasks?: number;
+  subtasks?: Array<{
+    id: string;
+    title: string;
+    status: "pending" | "in_progress" | "completed";
+  }>;
 }
 
 export interface RalphLoopCommit {
@@ -51,6 +66,11 @@ export interface CreateRalphLoopRequest {
   prompt: string;
   max_iterations?: number;
   completion_promise?: string;
+  // Ralph Iterative options
+  enable_subagents?: boolean;
+  auto_commit?: boolean;
+  auto_pr?: boolean;
+  base_branch?: string;
 }
 
 // ============================================================================
