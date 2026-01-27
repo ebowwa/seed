@@ -100,24 +100,6 @@ export class LaneTool extends BaseTool {
       throw new Error(`Failed to build lane`);
     }
 
-<<<<<<< HEAD
-    // Install globally by symlinking to bin directory
-    // Note: bun install -g . has dependency loop bug with some packages
-    // Using direct symlink instead
-    console.log(`  → Installing ${this.name} globally...`);
-    await this.ensureDir(ctx.binDir);
-    const binPath = `${ctx.binDir}/lane`;
-
-    try {
-      // Remove existing symlink or file
-      await this.exec(["rm", "-f", binPath]);
-    } catch {}
-
-    // Create symlink to the built binary
-    await this.exec(["ln", "-s", `${cloneDir}/lane`, binPath]);
-
-    console.log(`  ✓ ${this.name} linked to ${binPath}`);
-=======
     // Install globally via bun
     console.log(`  → Installing ${this.name} globally...`);
     const globalInstallProc = Bun.spawn(
@@ -133,7 +115,6 @@ export class LaneTool extends BaseTool {
     if (globalExitCode !== 0) {
       throw new Error(`Failed to install lane globally`);
     }
->>>>>>> Bun-port
 
     // Set up shell completion
     console.log(`  → Setting up shell integration...`);
@@ -147,10 +128,6 @@ export class LaneTool extends BaseTool {
       console.log(`  ⚠ Shell integration skipped (you can run 'lane init-shell' manually)`);
     }
 
-<<<<<<< HEAD
-    console.log(`  ✓ ${this.name} installed`);
-=======
     console.log(`  ✓ ${this.name} installed from ${this.BRANCH} branch`);
->>>>>>> Bun-port
   }
 }
