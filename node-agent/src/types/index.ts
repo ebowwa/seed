@@ -66,6 +66,11 @@ export interface CreateRalphLoopRequest {
   prompt: string;
   max_iterations?: number;
   completion_promise?: string;
+  // Ralph Iterative options
+  enable_subagents?: boolean;
+  auto_commit?: boolean;
+  auto_pr?: boolean;
+  base_branch?: string;
 }
 
 // ============================================================================
