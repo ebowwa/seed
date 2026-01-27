@@ -47,6 +47,9 @@ export class RalphService {
    * Scans for:
    * 1. .claude/.ralph-iterative.*.json files (new Ralph Iterative skill)
    * 2. .claude/ralph-loop.local.md files (legacy format)
+   *
+   * TODO: Add caching for Ralph state files to avoid repeated disk reads
+   * TODO: Consider using fs.watch() for real-time updates instead of polling
    */
   async listRalphLoops(): Promise<RalphLoop[]> {
     const loops: RalphLoop[] = [];

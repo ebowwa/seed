@@ -94,6 +94,7 @@ async function handleRequest(req: Request): Promise<Response> {
 
     // ========================================================================
     // GET /api/worktrees
+    // TODO: Worktree CRUD endpoints not tested with actual git worktrees
     // ========================================================================
     if (url.pathname === "/api/worktrees" && method === "GET") {
       const worktrees = await gitService.listWorktrees();
