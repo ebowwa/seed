@@ -70,6 +70,15 @@ export class RalphService {
         // Generate ID from project name and file path
         const id = `${projectName}-${state.iteration}`;
 
+        // Extract subtask info
+        const subtasks = state.slam?.subtasks || [];
+        const totalSubtasks = subtasks.length;
+        const completedSubtasks = state.slam?.completedSubtasks?.length || 0;
+
+        // Find current subtask
+        const currentSubtaskId = state.slam?.currentSubtask;
+        const currentSubtask = subtasks.find((st) => st.id === currentSubtaskId);
+
         loops.push({
           id,
           worktree_id: projectName,
@@ -80,6 +89,16 @@ export class RalphService {
           completion_promise: state.promise || null,
           started_at: state.startTime,
           last_activity: state.lastUpdate,
+          // Ralph Iterative specific fields
+          phase: state.slam?.phase,
+          current_task: currentSubtask?.title || state.slam?.state?.currentTask,
+          total_subtasks: totalSubtasks,
+          completed_subtasks: completedSubtasks,
+          subtasks: subtasks.map((st) => ({
+            id: st.id,
+            title: st.title,
+            status: st.status,
+          })),
         });
       } catch {
         // Invalid JSON or other error, skip
