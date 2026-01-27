@@ -39,6 +39,10 @@ export interface RalphLoop {
   recent_commits?: RalphLoopCommit[];
   error_message?: string;
   project_path?: string; // Relative path like ~/seed or ~/seed/worktrees/feature-x
+  git_info?: {
+    remote: string | null; // e.g., "origin" or "ebowwa/seed"
+    branch: string | null; // e.g., "Bun-port" or "main"
+  };
   // Ralph Iterative specific fields
   phase?: "planning" | "executing" | "review" | "complete";
   current_task?: string | null;

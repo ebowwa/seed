@@ -88,6 +88,9 @@ export class RalphService {
           projectPath = "~" + projectDir.slice(homeDir.length);
         }
 
+        // Get git info (remote and branch)
+        const gitInfo = await this.getGitInfo(projectDir);
+
         loops.push({
           id,
           worktree_id: projectName,
@@ -99,6 +102,7 @@ export class RalphService {
           started_at: state.startTime,
           last_activity: state.lastUpdate,
           project_path: projectPath,
+          git_info: gitInfo,
           // Ralph Iterative specific fields
           phase: state.slam?.phase,
           current_task: currentSubtask?.title || state.slam?.state?.currentTask,
@@ -469,6 +473,47 @@ ${state.prompt}
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Get git remote and branch info for a directory
+   */
+  private async getGitInfo(projectDir: string): Promise<{
+    remote: string | null;
+    branch: string | null;
+  }> {
+    try {
+      // Get current branch
+      let branch: string | null = null;
+      try {
+        const { stdout: branchOutput } = await execAsync(
+          `cd "${projectDir}" && git rev-parse --abbrev-ref HEAD`,
+        );
+        branch = branchOutput.trim() || null;
+      } catch {
+        branch = null;
+      }
+
+      // Get remote URL (origin)
+      let remote: string | null = null;
+      try {
+        const { stdout: remoteOutput } = await execAsync(
+          `cd "${projectDir}" && git config --get remote.origin.url`,
+        );
+        const remoteUrl = remoteOutput.trim();
+        // Extract owner/repo from URL (handles both https and ssh)
+        // https://github.com/ebowwa/seed.git -> ebowwa/seed
+        // git@github.com:ebowwa/seed.git -> ebowwa/seed
+        const match = remoteUrl.match(/[:/]([^\/]+\/[^\/\.]+)(\.git)?$/);
+        remote = match ? match[1] : remoteUrl || null;
+      } catch {
+        remote = null;
+      }
+
+      return { remote, branch };
+    } catch {
+      return { remote: null, branch: null };
     }
   }
 }
