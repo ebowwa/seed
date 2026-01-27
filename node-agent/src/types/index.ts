@@ -121,6 +121,66 @@ export interface RalphLoopStateFile {
   prompt: string;
 }
 
+// Ralph Iterative JSON state file (.claude/.ralph-iterative.*.json)
+export interface RalphIterativeStateFile {
+  prompt: string;
+  promise?: string;
+  iteration: number;
+  startTime: string;
+  lastUpdate: string;
+  tokens?: {
+    totalInput: number;
+    totalOutput: number;
+    byIteration?: Array<{ input: number; output: number }>;
+  };
+  filesChanged?: string[];
+  workMemory?: {
+    completedFiles: string[];
+    fileChecksums: Record<string, string>;
+  };
+  machine?: {
+    cpu: { count: number; model: string; tier: string };
+    memory: { total: number; free: number; tier: string };
+    disk: { total: number; available: number; tier: string };
+    platform: { os: string; arch: string; isContainer: boolean };
+    capacity: string;
+    score: number;
+  };
+  git?: {
+    enabled: boolean;
+    autoCommit: boolean;
+    baseBranch?: string;
+    branchName?: string;
+    currentCommit?: string;
+  };
+  slam?: {
+    enabled: boolean;
+    phase?: "planning" | "executing" | "review" | "complete";
+    state?: {
+      currentTask?: string;
+      beliefs?: Record<string, unknown>;
+      goals?: string[];
+    };
+    subtasks?: Array<{
+      id: string;
+      title: string;
+      description: string;
+      status: "pending" | "in_progress" | "completed";
+      priority: "high" | "medium" | "low";
+      estimatedComplexity: "simple" | "medium" | "complex";
+      dependencies: string[];
+      files: string[];
+    }>;
+    currentSubtask?: string | null;
+    completedSubtasks?: string[];
+  };
+  subagents?: {
+    enabled: boolean;
+    available: string[];
+    active: string[];
+  };
+}
+
 // ============================================================================
 // Process Types
 // ============================================================================

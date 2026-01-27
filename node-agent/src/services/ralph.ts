@@ -4,7 +4,13 @@ import { promises as fsp } from "fs";
 import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import path from "path";
-import type { RalphLoop, RalphLoopStateFile, CreateRalphLoopRequest, RalphLoopCommit } from "../types/index";
+import type {
+  RalphLoop,
+  RalphLoopStateFile,
+  RalphIterativeStateFile,
+  CreateRalphLoopRequest,
+  RalphLoopCommit,
+} from "../types/index";
 import { GitService } from "./git";
 
 const execAsync = promisify(exec);
@@ -13,6 +19,12 @@ const execAsync = promisify(exec);
 const NODE_AGENT_DIR = path.join(process.env.HOME || "", ".node-agent");
 const PIDS_DIR = path.join(NODE_AGENT_DIR, "pids");
 const LOGS_DIR = path.join(NODE_AGENT_DIR, "logs");
+
+// Directories to scan for Ralph Iterative state files
+const RALPH_SCAN_DIRS = [
+  path.join(process.env.HOME || "", "seed"), // Main seed directory
+  path.join(process.env.HOME || "", "seed", "worktrees"), // Worktrees
+];
 
 export class RalphService {
   private gitService: GitService;
@@ -31,10 +43,52 @@ export class RalphService {
 
   /**
    * List all Ralph loops (by checking state files and tracking processes)
+   *
+   * Scans for:
+   * 1. .claude/.ralph-iterative.*.json files (new Ralph Iterative skill)
+   * 2. .claude/ralph-loop.local.md files (legacy format)
    */
   async listRalphLoops(): Promise<RalphLoop[]> {
-    const worktrees = await this.gitService.listWorktrees();
     const loops: RalphLoop[] = [];
+
+    // Scan for Ralph Iterative JSON state files
+    const iterativeFiles = await this.findRalphIterativeStateFiles();
+
+    for (const { filePath, projectName } of iterativeFiles) {
+      try {
+        const content = await fsp.readFile(filePath, "utf-8");
+        const state: RalphIterativeStateFile = JSON.parse(content);
+
+        // Determine status from SLAM phase
+        let status: "starting" | "running" | "complete" | "error" | "stopped" = "running";
+        if (state.slam?.phase === "complete") {
+          status = "complete";
+        } else if (state.slam?.phase === "planning") {
+          status = "starting";
+        }
+
+        // Generate ID from project name and file path
+        const id = `${projectName}-${state.iteration}`;
+
+        loops.push({
+          id,
+          worktree_id: projectName,
+          status,
+          prompt: state.prompt,
+          iteration: state.iteration,
+          max_iterations: 0, // Ralph Iterative doesn't use max_iterations
+          completion_promise: state.promise || null,
+          started_at: state.startTime,
+          last_activity: state.lastUpdate,
+        });
+      } catch {
+        // Invalid JSON or other error, skip
+        continue;
+      }
+    }
+
+    // Also scan for legacy markdown state files in worktrees
+    const worktrees = await this.gitService.listWorktrees();
 
     for (const worktree of worktrees) {
       const stateFile = path.join(worktree.path, ".claude", "ralph-loop.local.md");
@@ -87,6 +141,64 @@ export class RalphService {
     }
 
     return loops;
+  }
+
+  /**
+   * Find all Ralph Iterative state files (.claude/.ralph-iterative.*.json)
+   * by scanning configured directories recursively
+   */
+  private async findRalphIterativeStateFiles(): Promise<
+    Array<{ filePath: string; projectName: string }>
+  > {
+    const results: Array<{ filePath: string; projectName: string }> = [];
+
+    for (const scanDir of RALPH_SCAN_DIRS) {
+      try {
+        await this.scanDirectoryForRalphFiles(scanDir, results);
+      } catch {
+        // Directory doesn't exist or isn't accessible, skip
+        continue;
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Recursively scan a directory for .claude/.ralph-iterative.*.json files
+   */
+  private async scanDirectoryForRalphFiles(
+    dirPath: string,
+    results: Array<{ filePath: string; projectName: string }>,
+  ): Promise<void> {
+    try {
+      const entries = await fsp.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dirPath, entry.name);
+
+        if (entry.isDirectory()) {
+          // Skip node_modules and hidden dirs (except .claude)
+          if (entry.name === "node_modules" || (entry.name.startsWith(".") && entry.name !== ".claude")) {
+            continue;
+          }
+          // Recursively scan subdirectories
+          await this.scanDirectoryForRalphFiles(fullPath, results);
+        } else if (entry.name.startsWith(".ralph-iterative.") && entry.name.endsWith(".json")) {
+          // Found a Ralph Iterative state file!
+          // Determine project name from parent directory or path
+          const parentDir = path.basename(dirPath);
+          const projectName = parentDir === ".claude" ? path.basename(path.dirname(dirPath)) : parentDir;
+
+          results.push({
+            filePath: fullPath,
+            projectName,
+          });
+        }
+      }
+    } catch {
+      // Directory not accessible, skip
+    }
   }
 
   /**
