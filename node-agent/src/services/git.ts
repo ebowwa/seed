@@ -34,16 +34,18 @@ export class GitService {
     }
 
     try {
-      const { stdout } = await execAsync(`git worktree list --porcelain`, { cwd: repoPath });
+      const { stdout } = await execAsync(`git worktree list`, { cwd: repoPath });
       const worktrees: Worktree[] = [];
 
       for (const line of stdout.trim().split("\n")) {
         if (!line) continue;
 
-        const parts = line.split(" ");
+        // Parse regular git worktree list output format:
+        // /path/to/worktree  abc1234 [branch-name]
+        const parts = line.trim().split(/\s+/);
         const worktreePath = parts[0];
         const commit = parts[1];
-        const branch = parts[2]?.replace("refs/heads/", "") || "detached";
+        const branch = parts[2]?.replace(/^\[|\]$/g, "") || "detached";
 
         // Extract worktree ID from path
         const id = worktreePath.split("/").pop() || path.basename(worktreePath);
