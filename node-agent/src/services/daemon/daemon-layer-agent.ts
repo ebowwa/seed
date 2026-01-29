@@ -192,7 +192,7 @@ class PersistentClaudeSession {
   }
 }
 
-export class PmBrainService {
+export class DaemonLayerAgentService {
   private config: Required<PmBrainConfig>;
   private persistentSession: PersistentClaudeSession | null = null;
   private isProcessing: boolean = false;

@@ -18,7 +18,7 @@ import type {
 import { TelegramService } from "./services/daemon/telegram";
 import { PmCommandsService } from "./services/daemon/pm-commands";
 import { PmMonitorService } from "./services/daemon/pm-monitor";
-import { PmBrainService } from "./services/daemon/pm-brain";
+import { DaemonLayerAgentService } from "./services/daemon/daemon-layer-agent";
 
 // Configuration
 const PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
@@ -708,7 +708,7 @@ async function startPmDaemon(): Promise<void> {
     // Initialize services
     const telegramService = new TelegramService();
     const pmCommands = new PmCommandsService();
-    const pmBrain = new PmBrainService();
+    const daemonLayerAgent = new DaemonLayerAgentService();
     const pmMonitor = new PmMonitorService({
       intervalMs: parseInt(process.env.PM_MONITOR_INTERVAL_MS || "30000", 10),
       stallThresholdMinutes: parseInt(process.env.PM_STALL_THRESHOLD_MINUTES || "10", 10),
@@ -723,10 +723,10 @@ async function startPmDaemon(): Promise<void> {
     }
     console.log(`[PM Daemon] ✓ Connected to Telegram bot: @${testResult.bot?.username}`);
 
-    // Start PM brain session (persistent conversation memory)
-    console.log("[PM Daemon] Starting PM brain session...");
-    await pmBrain.start();
-    console.log(`[PM Daemon] ✓ PM brain session running`);
+    // Start Daemon Layer Agent session (persistent conversation memory)
+    console.log("[PM Daemon] Starting Daemon Layer Agent session...");
+    await daemonLayerAgent.start();
+    console.log(`[PM Daemon] ✓ Daemon Layer Agent session running`);
 
     // Get local hostname for startup message
     const localHostname = await getHostname();
@@ -771,12 +771,12 @@ Time: ${new Date().toISOString()}
           return;
         }
 
-        // Chat messages go to PM brain
-        const brainResponse = await pmBrain.processMessage(command.raw_text, {
+        // Chat messages go to Daemon Layer Agent
+        const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
           events: recentEvents.slice(-5),
         });
 
-        await telegramService.sendText(brainResponse.text);
+        await telegramService.sendText(agentResponse.text);
       },
       onError: (error) => {
         console.error("[PM Daemon] Telegram polling error:", error);
@@ -860,9 +860,9 @@ ${event.node_id}: ${warnings.join(", ")}
       telegramService.stopPolling();
       pmMonitor.stopMonitoring();
 
-      // Stop PM brain session
-      console.log("[PM Daemon] Stopping PM brain session...");
-      await pmBrain.stop();
+      // Stop Daemon Layer Agent session
+      console.log("[PM Daemon] Stopping Daemon Layer Agent session...");
+      await daemonLayerAgent.stop();
 
       await telegramService.sendText("🔴 PM Daemon shutting down");
 
