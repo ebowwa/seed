@@ -607,6 +607,12 @@ async function startPmDaemon(): Promise<void> {
     }
     console.log(`[PM Daemon] ✓ Connected to Telegram bot: @${testResult.bot?.username}`);
 
+    // Start PM brain session (persistent conversation memory)
+    console.log("[PM Daemon] Starting PM brain session...");
+    await pmBrain.start();
+    const brainStats = pmBrain.getSessionStats();
+    console.log(`[PM Daemon] ✓ PM brain session: ${brainStats.sessionId}`);
+
     // Send startup notification
     await telegramService.sendText(`🟢 *PM Daemon Online*
 
@@ -748,6 +754,10 @@ Duration: ${Math.floor(event.data.duration_seconds / 60)}m
       telegramService.stopPolling();
       pmMonitor.stopMonitoring();
       nodeRegistry.stopHealthChecks();
+
+      // Stop PM brain session
+      console.log("[PM Daemon] Stopping PM brain session...");
+      await pmBrain.stop();
 
       await telegramService.sendText("🔴 PM Daemon shutting down");
 

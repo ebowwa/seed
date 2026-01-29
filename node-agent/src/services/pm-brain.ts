@@ -1,19 +1,15 @@
 // PM Brain Service
 // Claude Code session manager - the AI brain of the PM daemon
 //
-// DESIGN NOTE: This implementation uses the doppler subprocess approach
-// (spawn `doppler run -- claude`) rather than the ClaudeAgentClient SDK.
+// DESIGN: Uses a persistent virtual session with conversation history.
+// Each message includes full conversation context for stateless Claude Code CLI.
 //
-// Rationale:
-// - The ClaudeAgentClient lives in com.hetzner.codespaces (a separate project)
-// - Setting up workspace dependencies would require monorepo restructuring
-// - The doppler subprocess approach is simple, works, and inherits all secrets
-// - Performance is acceptable for PM daemon use case (low message volume)
+// Why not a single long-running process?
+// - Claude Code CLI (`claude -p`) is designed for single-shot execution
+// - No persistent stdin/stdout mode for multiple prompts
+// - Solution: Maintain conversation history, include in each call
 //
-// Future enhancement: If message volume increases, consider:
-// - Extracting ClaudeAgentClient to a shared npm package
-// - Setting up workspace dependencies with bun
-// - Using persistent Claude Code sessions instead of per-message spawns
+// Future: Use ClaudeAgentClient SDK for true persistent sessions
 
 import { spawn } from "child_process";
 import { promises as fsp } from "fs";
@@ -71,129 +67,219 @@ You can query node-agent APIs:
 The operator messages you via Telegram. Be helpful but brief. The operator is technical and values directness.
 
 If you detect a problem (stalled Ralph, resource exhaustion, errors), proactively notify the operator with context and suggested actions.
+
+## Memory
+
+You remember our conversation. Reference previous context when relevant. Build understanding over time about the fleet and operator preferences.
 `;
 
-const SESSION_TIMEOUT_MS = 300000; // 5 minutes
-const MAX_SESSION_MESSAGES = 50;
+const MAX_SESSION_MESSAGES = 100; // Keep last 100 messages for context
+const RESPONSE_TIMEOUT_MS = 120000; // 2 minutes per response
 
 export interface PmBrainConfig {
   dopplerProject?: string;
   dopplerConfig?: string;
   cwd?: string;
-  sessionTimeout?: number;
   maxMessages?: number;
 }
 
 export class PmBrainService {
   private config: Required<PmBrainConfig>;
-  private currentSession: PmBrainSession | null = null;
-  private sessionTimer: ReturnType<typeof setTimeout> | null = null;
+  private session: PmBrainSession | null = null;
+  private isProcessing: boolean = false;
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
       dopplerProject: config.dopplerProject || process.env.DOPPLER_PROJECT || "seed",
       dopplerConfig: config.dopplerConfig || process.env.DOPPLER_CONFIG || "prd",
       cwd: config.cwd || process.cwd(),
-      sessionTimeout: config.sessionTimeout || SESSION_TIMEOUT_MS,
       maxMessages: config.maxMessages || MAX_SESSION_MESSAGES,
     };
   }
 
   /**
+   * Start the PM brain session
+   * Called when PM daemon starts up
+   */
+  async start(): Promise<void> {
+    if (this.session) {
+      console.warn("[PmBrain] Session already active");
+      return;
+    }
+
+    const sessionId = `pm-${Date.now()}`;
+    this.session = {
+      session_id: sessionId,
+      started_at: new Date().toISOString(),
+      messages: [],
+      last_activity: new Date().toISOString(),
+    };
+
+    // Add system prompt as first message
+    this.addMessage("system", PM_SYSTEM_PROMPT);
+
+    console.log(`[PmBrain] Session started: ${sessionId}`);
+  }
+
+  /**
+   * Stop the PM brain session
+   * Called when PM daemon shuts down
+   */
+  async stop(): Promise<void> {
+    if (!this.session) {
+      return;
+    }
+
+    console.log(`[PmBrain] Session ending: ${this.session.session_id}`);
+    this.session = null;
+  }
+
+  /**
+   * Check if session is active
+   */
+  isSessionActive(): boolean {
+    return this.session !== null;
+  }
+
+  /**
    * Process a message through the PM brain
-   * For MVP: Spawn a new Claude Code session per message via doppler run
+   * Maintains conversation context across calls
    */
   async processMessage(
-    message: string,
+    userMessage: string,
     context?: {
       nodes?: RegisteredNode[];
       events?: MonitorEvent[];
     }
   ): Promise<PmBrainResponse> {
-    // Build the full prompt with context
-    const fullPrompt = this.buildPrompt(message, context);
+    if (!this.session) {
+      throw new Error("PM Brain session not started. Call start() first.");
+    }
 
-    console.log("[PmBrain] Processing message via Claude Code...");
+    if (this.isProcessing) {
+      console.warn("[PmBrain] Already processing a message, queuing...");
+      return {
+        text: "Busy processing previous message. Try again in a moment.",
+      };
+    }
+
+    this.isProcessing = true;
 
     try {
-      // Spawn Claude Code via doppler run
-      const response = await this.spawnClaudeCode(fullPrompt);
+      // Build conversation context with current state
+      const promptWithContext = this.buildPromptWithContext(userMessage, context);
+
+      // Add user message to session history
+      this.addMessage("user", userMessage);
+
+      console.log("[PmBrain] Processing message (session has", this.session.messages.length, "messages)");
+
+      // Call Claude Code with full context
+      const response = await this.callClaudeCode(promptWithContext);
+
+      // Add assistant response to session history
+      this.addMessage("assistant", response);
 
       return {
         text: response,
         actions: [], // Could parse for actions in the future
         context: {
+          sessionId: this.session.session_id,
+          messageCount: this.session.messages.length,
           timestamp: new Date().toISOString(),
         },
       };
     } catch (error) {
       console.error("[PmBrain] Error processing message:", error);
+
+      // Remove the user message since it failed
+      this.session.messages.pop();
+
       return {
-        text: `Error processing message: ${error instanceof Error ? error.message : String(error)}`,
+        text: `Error: ${error instanceof Error ? error.message : String(error)}`,
       };
+    } finally {
+      this.isProcessing = false;
     }
   }
 
   /**
-   * Build the full prompt with system prompt and context
+   * Build prompt with conversation history and current context
    */
-  private buildPrompt(
+  private buildPromptWithContext(
     userMessage: string,
     context?: {
       nodes?: RegisteredNode[];
       events?: MonitorEvent[];
     }
   ): string {
-    const parts: string[] = [PM_SYSTEM_PROMPT];
+    const parts: string[] = [];
 
-    // Add node context
+    // Add recent conversation history (last 20 messages to avoid overwhelming context)
+    const recentMessages = this.session.messages.slice(-20);
+
+    for (const msg of recentMessages) {
+      if (msg.role === "system") {
+        parts.push(`[System: ${msg.content}]`);
+      } else if (msg.role === "user") {
+        parts.push(`[User said: ${msg.content}]`);
+      } else if (msg.role === "assistant") {
+        parts.push(`[You responded: ${msg.content}]`);
+      }
+    }
+
+    // Add current context
+    parts.push("\n=== Current Situation ===");
+
     if (context?.nodes) {
       const onlineNodes = context.nodes.filter((n) => n.status === "online");
       const offlineNodes = context.nodes.filter((n) => n.status !== "online");
 
-      parts.push("\n## Current Node Status");
-      parts.push(`Total nodes: ${context.nodes.length} (${onlineNodes.length} online)`);
+      parts.push(`\n**Node Status**`);
+      parts.push(`Total: ${context.nodes.length} nodes (${onlineNodes.length} online)`);
 
       if (onlineNodes.length > 0) {
-        parts.push("\nOnline nodes:");
+        parts.push("\nOnline:");
         for (const node of onlineNodes) {
           if (node.node_status) {
             const loops = node.node_status.ralph_loops?.length || 0;
             const cpu = node.node_status.capacity.cpu_percent;
             const mem = node.node_status.capacity.memory_percent;
-            parts.push(`- ${node.id}: ${loops} loops, CPU ${cpu}%, Mem ${mem}%`);
+            parts.push(`  - ${node.id}: ${loops} loops, CPU ${cpu}%, Mem ${mem}%`);
           }
         }
       }
 
       if (offlineNodes.length > 0) {
-        parts.push("\nOffline nodes:");
+        parts.push("\nOffline:");
         for (const node of offlineNodes) {
-          parts.push(`- ${node.id}: ${node.status}`);
+          parts.push(`  - ${node.id}: ${node.status}`);
         }
       }
     }
 
-    // Add recent events context
+    // Add recent events
     if (context?.events && context.events.length > 0) {
-      parts.push("\n## Recent Events");
+      parts.push(`\n**Recent Events**`);
       for (const event of context.events.slice(-5)) {
         const time = new Date(event.timestamp).toLocaleTimeString();
-        parts.push(`- [${time}] ${event.type} on ${event.node_id}: ${JSON.stringify(event.data).substring(0, 100)}`);
+        const dataStr = JSON.stringify(event.data).substring(0, 80);
+        parts.push(`  [${time}] ${event.type} on ${event.node_id}: ${dataStr}`);
       }
     }
 
-    parts.push("\n## User Message");
+    // Current message
+    parts.push(`\n=== Current Message ===`);
     parts.push(userMessage);
 
-    return parts.join("\n\n");
+    return parts.join("\n");
   }
 
   /**
-   * Spawn Claude Code via doppler run and get response
-   * This is the MVP approach - simple, stateless per-message
+   * Call Claude Code CLI via doppler run
+   * Stateless but includes full conversation context
    */
-  private async spawnClaudeCode(prompt: string): Promise<string> {
+  private async callClaudeCode(prompt: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const args = [
         "run",
@@ -207,13 +293,10 @@ export class PmBrainService {
         prompt,
       ];
 
-      console.log("[PmBrain] Spawning: doppler", args.join(" "));
-
       const claude = spawn("doppler", args, {
         cwd: this.config.cwd,
         env: {
           ...process.env,
-          // Ensure Claude Code knows it's running non-interactively
           CLAUDE_INTERACTIVE: "0",
         },
       });
@@ -231,7 +314,6 @@ export class PmBrainService {
 
       claude.on("close", (code) => {
         if (code === 0) {
-          // Extract just the Claude response (strip ANSI codes, etc.)
           const response = this.cleanOutput(stdout);
           resolve(response);
         } else {
@@ -243,12 +325,39 @@ export class PmBrainService {
         reject(new Error(`Failed to spawn Claude Code: ${error.message}`));
       });
 
-      // Timeout after 2 minutes
+      // Timeout
       setTimeout(() => {
         claude.kill("SIGTERM");
-        reject(new Error("Claude Code timed out after 2 minutes"));
-      }, 120000);
+        reject(new Error(`Claude Code timed out after ${RESPONSE_TIMEOUT_MS}ms`));
+      }, RESPONSE_TIMEOUT_MS);
     });
+  }
+
+  /**
+   * Add a message to session history
+   */
+  private addMessage(role: "user" | "assistant" | "system", content: string): void {
+    if (!this.session) {
+      return;
+    }
+
+    this.session.messages.push({
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Trim to max messages (keep system prompt + recent messages)
+    if (this.session.messages.length > this.config.maxMessages) {
+      // Always keep the first message (system prompt)
+      const systemPrompt = this.session.messages[0];
+      this.session.messages = [
+        systemPrompt,
+        ...this.session.messages.slice(-this.config.maxMessages + 1),
+      ];
+    }
+
+    this.session.last_activity = new Date().toISOString();
   }
 
   /**
@@ -266,90 +375,53 @@ export class PmBrainService {
   }
 
   /**
-   * Start a persistent PM brain session (future feature)
-   * This would maintain conversation context across messages
-   */
-  async startSession(): Promise<void> {
-    if (this.currentSession) {
-      console.warn("[PmBrain] Session already active");
-      return;
-    }
-
-    const sessionId = `pm-${Date.now()}`;
-    this.currentSession = {
-      session_id: sessionId,
-      started_at: new Date().toISOString(),
-      messages: [],
-      last_activity: new Date().toISOString(),
-    };
-
-    console.log(`[PmBrain] Started session: ${sessionId}`);
-
-    // Reset session timeout
-    this.resetSessionTimer();
-  }
-
-  /**
-   * End the current session
-   */
-  async endSession(): Promise<void> {
-    if (this.sessionTimer) {
-      clearTimeout(this.sessionTimer);
-      this.sessionTimer = null;
-    }
-
-    if (this.currentSession) {
-      console.log(`[PmBrain] Ended session: ${this.currentSession.session_id}`);
-      this.currentSession = null;
-    }
-  }
-
-  /**
-   * Reset the session timeout timer
-   */
-  private resetSessionTimer(): void {
-    if (this.sessionTimer) {
-      clearTimeout(this.sessionTimer);
-    }
-
-    this.sessionTimer = setTimeout(() => {
-      console.log("[PmBrain] Session timed out, ending session");
-      this.endSession();
-    }, this.config.sessionTimeout);
-  }
-
-  /**
-   * Add a message to the session history
-   */
-  private addMessageToSession(role: "user" | "assistant" | "system", content: string): void {
-    if (!this.currentSession) {
-      return;
-    }
-
-    this.currentSession.messages.push({
-      role,
-      content,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Trim old messages if over limit
-    if (this.currentSession.messages.length > this.config.maxMessages) {
-      this.currentSession.messages = this.currentSession.messages.slice(-this.config.maxMessages);
-    }
-
-    this.currentSession.last_activity = new Date().toISOString();
-    this.resetSessionTimer();
-  }
-
-  /**
-   * Get the current session info
+   * Get session info
    */
   getSession(): PmBrainSession | null {
-    return this.currentSession;
+    return this.session;
   }
 
   /**
-   * Load a custom system prompt from a file
+   * Get session statistics
+   */
+  getSessionStats(): {
+    active: boolean;
+    sessionId?: string;
+    messageCount: number;
+    uptime?: string;
+  } {
+    if (!this.session) {
+      return { active: false, messageCount: 0 };
+    }
+
+    const uptime = Date.now() - new Date(this.session.started_at).getTime();
+    const uptimeMinutes = Math.floor(uptime / 60000);
+
+    return {
+      active: true,
+      sessionId: this.session.session_id,
+      messageCount: this.session.messages.length,
+      uptime: `${uptimeMinutes}m`,
+    };
+  }
+
+  /**
+   * Clear session history (keep system prompt)
+   */
+  clearHistory(): void {
+    if (!this.session) {
+      return;
+    }
+
+    const systemPrompt = this.session.messages[0];
+    this.session.messages = [systemPrompt];
+    this.session.last_activity = new Date().toISOString();
+
+    console.log("[PmBrain] Session history cleared");
+  }
+
+  /**
+   * Load custom system prompt from file
    */
   async loadSystemPrompt(filePath?: string): Promise<string> {
     const paths = [
@@ -362,13 +434,18 @@ export class PmBrainService {
       try {
         const content = await fsp.readFile(p, "utf-8");
         console.log(`[PmBrain] Loaded system prompt from ${p}`);
+
+        // Update system prompt in session
+        if (this.session && this.session.messages[0]?.role === "system") {
+          this.session.messages[0].content = content;
+        }
+
         return content;
       } catch {
         // File doesn't exist, try next
       }
     }
 
-    // Return default prompt
     return PM_SYSTEM_PROMPT;
   }
 }
