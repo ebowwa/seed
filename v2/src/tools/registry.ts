@@ -13,6 +13,7 @@ import { GhTool } from "./gh";
 import { DopplerTool } from "./doppler";
 import { NodeTool } from "./node";
 import { TmuxTool } from "./tmux";
+import { RalphTool } from "./ralph";
 
 export interface Tool {
   name: string;
@@ -52,6 +53,7 @@ export class ToolRegistry {
       new NodeAgentTool(),
       new ClaudeTool(),
       new LaneTool(),
+      new RalphTool(),
       new GhTool(),
       new DopplerTool(),
     ];

@@ -9,7 +9,17 @@ import type {
   Worktree,
   RalphLoop,
   ApiError,
+  PortInfo,
+  PmCommand,
+  MonitorEvent,
 } from "./types/index";
+
+// PM Daemon imports (conditionally loaded)
+import { NodeRegistryService } from "./services/node-registry";
+import { TelegramService } from "./services/telegram";
+import { PmCommandsService } from "./services/pm-commands";
+import { PmMonitorService } from "./services/pm-monitor";
+import { PmBrainService } from "./services/pm-brain";
 
 // Configuration
 const PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
@@ -525,3 +535,232 @@ console.log(`   GET    /api/ralph-loops/:id`);
 console.log(`   DELETE /api/ralph-loops/:id`);
 console.log(`   GET    /api/ralph-loops/:id/logs`);
 console.log();
+
+// ============================================================================
+// PM Daemon Startup (Conditional)
+// ============================================================================
+
+const PM_DAEMON_ENABLED = process.env.PM_DAEMON_ENABLED === "true";
+
+if (PM_DAEMON_ENABLED) {
+  console.log(`
+╔═══════════════════════════════════════════════════════════════════╗
+║                                                                   ║
+║   ██████╗ ██████╗ ███████╗ █████╗ ███╗   ███╗███████╗            ║
+║   ██╔══██╗██╔══██╗██╔════╝██╔══██╗████╗ ████║██╔════╝            ║
+║   ██║  ██║██████╔╝█████╗  ███████║██╔████╔██║█████╗              ║
+║   ██║  ██║██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║██╔══╝              ║
+║   ██████╔╝██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗            ║
+║   ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝            ║
+║                                                                   ║
+║              PM Daemon - Telegram-Connected Orchestrator          ║
+║                                                                   ║
+╚═══════════════════════════════════════════════════════════════════╝
+`);
+
+  // Check for required environment variables
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    console.error("❌ PM_DAEMON_ENABLED is true, but TELEGRAM_BOT_TOKEN is not set");
+    console.error("   Please set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in Doppler or .env");
+    process.exit(1);
+  }
+
+  if (!process.env.TELEGRAM_CHAT_ID) {
+    console.error("❌ PM_DAEMON_ENABLED is true, but TELEGRAM_CHAT_ID is not set");
+    console.error("   Please set TELEGRAM_CHAT_ID in Doppler or .env");
+    process.exit(1);
+  }
+
+  // Initialize PM Daemon services
+  startPmDaemon();
+}
+
+/**
+ * Start the PM Daemon services
+ */
+async function startPmDaemon(): Promise<void> {
+  try {
+    // Initialize services
+    const nodeRegistry = new NodeRegistryService();
+    const telegramService = new TelegramService();
+    const pmCommands = new PmCommandsService();
+    const pmBrain = new PmBrainService();
+    const pmMonitor = new PmMonitorService({
+      intervalMs: parseInt(process.env.PM_MONITOR_INTERVAL_MS || "30000", 10),
+      stallThresholdMinutes: parseInt(process.env.PM_STALL_THRESHOLD_MINUTES || "10", 10),
+    });
+
+    // Load node registry
+    console.log("[PM Daemon] Loading node registry...");
+    await nodeRegistry.loadConfig();
+
+    // Start health checks
+    console.log("[PM Daemon] Starting node health checks...");
+    nodeRegistry.startHealthChecks();
+
+    // Test Telegram connection
+    console.log("[PM Daemon] Testing Telegram connection...");
+    const testResult = await telegramService.testConnection();
+    if (!testResult.ok) {
+      console.error(`[PM Daemon] Failed to connect to Telegram: ${testResult.error}`);
+      throw new Error(`Telegram connection failed: ${testResult.error}`);
+    }
+    console.log(`[PM Daemon] ✓ Connected to Telegram bot: @${testResult.bot?.username}`);
+
+    // Send startup notification
+    await telegramService.sendText(`🟢 *PM Daemon Online*
+
+Node: ${await getHostname()}
+Time: ${new Date().toISOString()}
+Nodes registered: ${nodeRegistry.getAllNodes().length}
+`);
+
+    // Recent events for context (circular buffer)
+    const recentEvents: MonitorEvent[] = [];
+    const MAX_RECENT_EVENTS = 10;
+
+    // Start Telegram polling loop
+    console.log("[PM Daemon] Starting Telegram polling loop...");
+    const telegramAbortController = new AbortController();
+
+    telegramService.startPolling({
+      signal: telegramAbortController.signal,
+      onUpdate: async (update) => {
+        if (!update.message) {
+          return;
+        }
+
+        const command = telegramService.parseCommand(update.message);
+        if (!command) {
+          return;
+        }
+
+        console.log(`[PM Daemon] Received command: /${command.command}`);
+
+        // Handle slash commands
+        if (command.command !== "chat") {
+          const response = await pmCommands.executeCommand(command, nodeRegistry.getAllNodes());
+          await telegramService.sendText(response.text, {
+            parse_mode: response.parse_mode,
+            reply_to_message_id: response.reply_to_message_id,
+          });
+          return;
+        }
+
+        // Chat messages go to PM brain
+        const nodes = nodeRegistry.getAllNodes();
+        const brainResponse = await pmBrain.processMessage(command.raw_text, {
+          nodes,
+          events: recentEvents.slice(-5),
+        });
+
+        await telegramService.sendText(brainResponse.text);
+      },
+      onError: (error) => {
+        console.error("[PM Daemon] Telegram polling error:", error);
+      },
+    });
+
+    // Start monitor loop
+    console.log("[PM Daemon] Starting monitor loop...");
+    const monitorAbortController = new AbortController();
+
+    pmMonitor.startMonitoring(
+      () => nodeRegistry.getAllNodes(),
+      {
+        signal: monitorAbortController.signal,
+        onEvent: async (event) => {
+          // Add to recent events
+          recentEvents.push(event);
+          if (recentEvents.length > MAX_RECENT_EVENTS) {
+            recentEvents.shift();
+          }
+
+          // For high-priority events, notify immediately
+          if (event.priority === "high" || event.priority === "critical") {
+            let message = "";
+
+            switch (event.type) {
+              case "ralph_stalled":
+                message = `⚠️ *Ralph Stalled*
+
+\`${event.data.loop_id}\` on ${event.node_id}
+Stuck at iteration ${event.data.iteration} for ${event.data.stall_duration_minutes} minutes
+
+Last activity: ${event.data.last_activity}
+`;
+                break;
+
+              case "ralph_errored":
+                message = `❌ *Ralph Error*
+
+\`${event.data.loop_id}\` on ${event.node_id}
+Iteration: ${event.data.iteration}
+
+Error: ${event.data.error_message}
+`;
+                break;
+
+              case "node_offline":
+                message = `🔴 *Node Offline*
+
+${event.node_id} is unreachable
+`;
+                break;
+
+              case "node_high_resources":
+                const warnings = event.data.warnings as string[];
+                message = `📊 *High Resource Usage*
+
+${event.node_id}: ${warnings.join(", ")}
+`;
+                break;
+
+              case "ralph_completed":
+                message = `✅ *Ralph Completed*
+
+\`${event.data.loop_id}\` on ${event.node_id}
+Iterations: ${event.data.total_iterations}
+Commits: ${event.data.total_commits}
+Duration: ${Math.floor(event.data.duration_seconds / 60)}m
+`;
+                break;
+
+              default:
+                // For other events, let the PM brain decide whether to notify
+                return;
+            }
+
+            await telegramService.sendText(message);
+          }
+        },
+      }
+    );
+
+    console.log("[PM Daemon] ✓ All PM Daemon services started");
+    console.log("[PM Daemon] 📱 Send /help to the bot for available commands");
+
+    // Graceful shutdown
+    const shutdown = async () => {
+      console.log("[PM Daemon] Shutting down...");
+      telegramAbortController.abort();
+      monitorAbortController.abort();
+      telegramService.stopPolling();
+      pmMonitor.stopMonitoring();
+      nodeRegistry.stopHealthChecks();
+
+      await telegramService.sendText("🔴 PM Daemon shutting down");
+
+      // Allow time for message to send
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      process.exit(0);
+    };
+
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+
+  } catch (error) {
+    console.error("[PM Daemon] Failed to start:", error);
+    process.exit(1);
+  }
+}

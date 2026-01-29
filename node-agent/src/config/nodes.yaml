@@ -1,0 +1,35 @@
+# PM Daemon Node Registry
+#
+# This file configures all node-agent instances that the PM daemon manages.
+# The PM daemon uses this registry to poll node status, monitor Ralph loops,
+# and dispatch commands across your fleet of VPS nodes.
+#
+# Format:
+# - id: Unique identifier for this node (used in commands)
+# - host: Tailscale IP address or hostname
+# - port: HTTP API port (default: 8911)
+# - label: Human-readable description
+# - location: (optional) Hetzner datacenter (nbg1, fsn1, hel1)
+# - server_type: (optional) Hetzner server type (cax21, cpx21, etc.)
+#
+# Notes:
+# - All nodes should be reachable via Tailscale
+# - Each node runs node-agent on the specified port
+# - The node with PM_DAEMON_ENABLED=true is typically excluded from this list
+#   (the PM daemon runs on one node and monitors all others)
+
+nodes:
+  # Example worker nodes
+  # - id: worker-1
+  #   host: 100.x.x.x  # Replace with Tailscale IP
+  #   port: 8911
+  #   label: "Worker 1 (cax21, nbg1)"
+  #   location: nbg1
+  #   server_type: cax21
+
+  # - id: worker-2
+  #   host: 100.x.x.x  # Replace with Tailscale IP
+  #   port: 8911
+  #   label: "Worker 2 (cax21, fsn1)"
+  #   location: fsn1
+  #   server_type: cax21
