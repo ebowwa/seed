@@ -1,16 +1,12 @@
 // PM Monitor Service
-// Monitor loop - polls all nodes, detects state changes, feeds events to PM brain
-// Events: Ralph completions, errors, stalls, node status changes, resource warnings
+// Monitor loop - polls local node, detects state changes, feeds events to PM brain
+// Events: Ralph completions, errors, stalls, resource warnings
 
 import type {
-  RegisteredNode,
   RalphLoop,
   NodeStatus,
   MonitorEvent,
-  RalphStallEvent,
-  RalphCompletionEvent,
-  RalphErrorEvent,
-} from "../types/index";
+} from "../../types/index";
 
 export interface MonitorOptions {
   onEvent?: (event: MonitorEvent) => Promise<void>;
@@ -26,12 +22,6 @@ export interface MonitorConfig {
     memory_percent: number;
     disk_percent: number;
   };
-}
-
-interface NodeStateSnapshot {
-  nodeId: string;
-  loops: Map<string, RalphLoopStateSnapshot>;
-  lastSeen: string;
 }
 
 interface RalphLoopStateSnapshot {
@@ -52,11 +42,15 @@ const DEFAULT_CONFIG: MonitorConfig = {
   },
 };
 
+const LOCALHOST = "127.0.0.1";
+const API_PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
+
 export class PmMonitorService {
   private config: MonitorConfig;
-  private nodeSnapshots: Map<string, NodeStateSnapshot> = new Map();
+  private loopSnapshots: Map<string, RalphLoopStateSnapshot> = new Map();
   private monitorInterval: ReturnType<typeof setInterval> | null = null;
   private isRunning: boolean = false;
+  private localNodeId: string = "localhost";
 
   constructor(config?: Partial<MonitorConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -65,10 +59,7 @@ export class PmMonitorService {
   /**
    * Start the monitor loop
    */
-  async startMonitoring(
-    nodes: () => RegisteredNode[],
-    options: MonitorOptions = {}
-  ): Promise<void> {
+  async startMonitoring(options: MonitorOptions = {}): Promise<void> {
     if (this.isRunning) {
       console.warn("[PmMonitor] Monitoring already running");
       return;
@@ -77,8 +68,11 @@ export class PmMonitorService {
     this.isRunning = true;
     console.log(`[PmMonitor] Starting monitor loop (interval: ${this.config.intervalMs}ms)`);
 
-    // Initial snapshot
-    await this.updateSnapshots(nodes());
+    // Get local node ID
+    const initialStatus = await this.fetchLocalStatus();
+    if (initialStatus) {
+      this.localNodeId = initialStatus.node_id;
+    }
 
     // Start monitoring loop
     this.monitorInterval = setInterval(async () => {
@@ -88,14 +82,14 @@ export class PmMonitorService {
       }
 
       try {
-        await this.monitorCycle(nodes(), options);
+        await this.monitorCycle(options);
       } catch (error) {
         console.error("[PmMonitor] Error in monitor cycle:", error);
       }
     }, this.config.intervalMs);
 
     // First cycle immediately
-    await this.monitorCycle(nodes(), options);
+    await this.monitorCycle(options);
   }
 
   /**
@@ -118,91 +112,30 @@ export class PmMonitorService {
   }
 
   /**
-   * Single monitor cycle - check all nodes for state changes
+   * Single monitor cycle - check local node for state changes
    */
-  private async monitorCycle(
-    nodes: RegisteredNode[],
-    options: MonitorOptions
-  ): Promise<void> {
-    const now = new Date().toISOString();
-
-    for (const node of nodes) {
-      // Skip offline nodes for state comparison
-      if (node.status === "offline") {
-        // Check if node went from online to offline
-        const snapshot = this.nodeSnapshots.get(node.id);
-        if (snapshot && node.node_status) {
-          await this.emitEvent({
-            type: "node_offline",
-            timestamp: now,
-            node_id: node.id,
-            data: {
-              message: `Node ${node.id} (${node.label}) is now offline`,
-            },
-            priority: "high",
-          }, options);
-        }
-        continue;
-      }
-
-      // Update node status
-      if (node.status === "online" && node.node_status) {
-        await this.checkNodeState(node, options);
-      }
-    }
-
-    // Clean up snapshots for nodes that no longer exist
-    const currentNodeIds = new Set(nodes.map((n) => n.id));
-    for (const nodeId of this.nodeSnapshots.keys()) {
-      if (!currentNodeIds.has(nodeId)) {
-        this.nodeSnapshots.delete(nodeId);
-      }
-    }
-  }
-
-  /**
-   * Check a single node for state changes
-   */
-  private async checkNodeState(
-    node: RegisteredNode,
-    options: MonitorOptions
-  ): Promise<void> {
-    if (!node.node_status) {
+  private async monitorCycle(options: MonitorOptions): Promise<void> {
+    const status = await this.fetchLocalStatus();
+    if (!status) {
       return;
     }
 
     const now = new Date().toISOString();
-    const previousSnapshot = this.nodeSnapshots.get(node.id);
-    const loops = node.node_status.ralph_loops || [];
+    const loops = status.ralph_loops || [];
 
     // Check for resource warnings
-    await this.checkResourceThresholds(node, options);
-
-    // Check for new nodes coming online
-    if (!previousSnapshot) {
-      await this.emitEvent({
-        type: "node_online",
-        timestamp: now,
-        node_id: node.id,
-        data: {
-          message: `Node ${node.id} (${node.label}) is now online`,
-        },
-        priority: "low",
-      }, options);
-    }
+    await this.checkResourceThresholds(status, options);
 
     // Check Ralph loops for state changes
-    const previousLoops = previousSnapshot?.loops || new Map();
-
     for (const loop of loops) {
-      const previousState = previousLoops.get(loop.id);
+      const previousState = this.loopSnapshots.get(loop.id);
 
       // New loop detected
       if (!previousState) {
         await this.emitEvent({
           type: "ralph_started",
           timestamp: now,
-          node_id: node.id,
+          node_id: this.localNodeId,
           data: {
             loop_id: loop.id,
             worktree_id: loop.worktree_id,
@@ -215,44 +148,41 @@ export class PmMonitorService {
       }
 
       // Check for loop state changes
-      await this.checkLoopStateChanges(node, loop, previousState, options);
+      await this.checkLoopStateChanges(loop, previousState, options);
     }
 
     // Check for completed loops (removed from list)
-    if (previousSnapshot) {
-      for (const [loopId, previousLoop] of previousSnapshot.loops) {
-        const currentLoop = loops.find((l) => l.id === loopId);
+    for (const [loopId, previousLoop] of this.loopSnapshots) {
+      const currentLoop = loops.find((l) => l.id === loopId);
 
-        if (!currentLoop) {
-          // Loop was removed from the list - could mean completion or cleanup
-          if (previousLoop.status === "running") {
-            await this.emitEvent({
-              type: "ralph_completed",
-              timestamp: now,
-              node_id: node.id,
-              data: {
-                loop_id: loopId,
-                worktree_id: "", // Not available
-                total_iterations: previousLoop.iteration,
-                total_commits: 0,
-                duration_seconds: 0,
-              },
-              priority: "medium",
-            }, options);
-          }
+      if (!currentLoop) {
+        // Loop was removed from the list - could mean completion or cleanup
+        if (previousLoop.status === "running") {
+          await this.emitEvent({
+            type: "ralph_completed",
+            timestamp: now,
+            node_id: this.localNodeId,
+            data: {
+              loop_id: loopId,
+              worktree_id: "",
+              total_iterations: previousLoop.iteration,
+              total_commits: 0,
+              duration_seconds: 0,
+            },
+            priority: "medium",
+          }, options);
         }
       }
     }
 
-    // Update snapshot
-    await this.updateNodeSnapshot(node, loops);
+    // Update snapshots
+    this.updateLoopSnapshots(loops);
   }
 
   /**
    * Check for Ralph loop state changes
    */
   private async checkLoopStateChanges(
-    node: RegisteredNode,
     loop: RalphLoop,
     previousState: RalphLoopStateSnapshot,
     options: MonitorOptions
@@ -269,7 +199,7 @@ export class PmMonitorService {
       await this.emitEvent({
         type: "ralph_completed",
         timestamp: now,
-        node_id: node.id,
+        node_id: this.localNodeId,
         data: {
           loop_id: loop.id,
           worktree_id: loop.worktree_id,
@@ -287,7 +217,7 @@ export class PmMonitorService {
       await this.emitEvent({
         type: "ralph_errored",
         timestamp: now,
-        node_id: node.id,
+        node_id: this.localNodeId,
         data: {
           loop_id: loop.id,
           worktree_id: loop.worktree_id,
@@ -308,7 +238,7 @@ export class PmMonitorService {
         await this.emitEvent({
           type: "ralph_stalled",
           timestamp: now,
-          node_id: node.id,
+          node_id: this.localNodeId,
           data: {
             loop_id: loop.id,
             worktree_id: loop.worktree_id,
@@ -328,7 +258,7 @@ export class PmMonitorService {
           await this.emitEvent({
             type: "ralph_milestone",
             timestamp: now,
-            node_id: node.id,
+            node_id: this.localNodeId,
             data: {
               loop_id: loop.id,
               worktree_id: loop.worktree_id,
@@ -346,14 +276,14 @@ export class PmMonitorService {
    * Check resource thresholds
    */
   private async checkResourceThresholds(
-    node: RegisteredNode,
+    status: NodeStatus,
     options: MonitorOptions
   ): Promise<void> {
-    if (!node.node_status || !this.config.resourceThresholds) {
+    if (!this.config.resourceThresholds) {
       return;
     }
 
-    const capacity = node.node_status.capacity;
+    const capacity = status.capacity;
     const thresholds = this.config.resourceThresholds;
     const warnings: string[] = [];
 
@@ -373,7 +303,7 @@ export class PmMonitorService {
       await this.emitEvent({
         type: "node_high_resources",
         timestamp: new Date().toISOString(),
-        node_id: node.id,
+        node_id: this.localNodeId,
         data: {
           warnings,
           capacity,
@@ -384,38 +314,25 @@ export class PmMonitorService {
   }
 
   /**
-   * Update node snapshot
+   * Update loop snapshots
    */
-  private async updateNodeSnapshot(
-    node: RegisteredNode,
-    loops: RalphLoop[]
-  ): Promise<void> {
-    const loopSnapshots = new Map<string, RalphLoopStateSnapshot>();
+  private updateLoopSnapshots(loops: RalphLoop[]): void {
+    // Remove snapshots for loops that no longer exist
+    const currentLoopIds = new Set(loops.map((l) => l.id));
+    for (const loopId of this.loopSnapshots.keys()) {
+      if (!currentLoopIds.has(loopId)) {
+        this.loopSnapshots.delete(loopId);
+      }
+    }
 
+    // Update or add snapshots for current loops
     for (const loop of loops) {
-      loopSnapshots.set(loop.id, {
+      this.loopSnapshots.set(loop.id, {
         id: loop.id,
         status: loop.status,
         iteration: loop.iteration,
         last_activity: loop.last_activity || loop.started_at,
       });
-    }
-
-    this.nodeSnapshots.set(node.id, {
-      nodeId: node.id,
-      loops: loopSnapshots,
-      lastSeen: new Date().toISOString(),
-    });
-  }
-
-  /**
-   * Update all snapshots
-   */
-  private async updateSnapshots(nodes: RegisteredNode[]): Promise<void> {
-    for (const node of nodes) {
-      if (node.status === "online" && node.node_status) {
-        await this.updateNodeSnapshot(node, node.node_status.ralph_loops || []);
-      }
     }
   }
 
@@ -436,16 +353,29 @@ export class PmMonitorService {
   }
 
   /**
-   * Get current state snapshots
+   * Fetch local node status
    */
-  getSnapshots(): Map<string, NodeStateSnapshot> {
-    return new Map(this.nodeSnapshots);
+  private async fetchLocalStatus(): Promise<NodeStatus | null> {
+    try {
+      const response = await fetch(`http://${LOCALHOST}:${API_PORT}/api/status`, {
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const data = (await response.json()) as { data?: NodeStatus };
+      return data.data || null;
+    } catch {
+      return null;
+    }
   }
 
   /**
-   * Get snapshot for a specific node
+   * Get current loop snapshots
    */
-  getNodeSnapshot(nodeId: string): NodeStateSnapshot | undefined {
-    return this.nodeSnapshots.get(nodeId);
+  getSnapshots(): Map<string, RalphLoopStateSnapshot> {
+    return new Map(this.loopSnapshots);
   }
 }

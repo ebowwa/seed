@@ -15,7 +15,6 @@ import type {
 } from "./types/index";
 
 // PM Daemon imports (conditionally loaded)
-import { NodeRegistryService } from "./services/daemon/node-registry";
 import { TelegramService } from "./services/daemon/telegram";
 import { PmCommandsService } from "./services/daemon/pm-commands";
 import { PmMonitorService } from "./services/daemon/pm-monitor";
@@ -517,10 +516,135 @@ console.log(`
 ╚═══════════════════════════════════════════════════════════════════╝
 `);
 
-const server = Bun.serve({
+// Type for WebSocket data
+type WebSocketData = {
+  loopId: string;
+};
+
+// Track active WebSocket connections and their pipe cleanup
+const wsConnections = new Map<string, { cleanup: () => void }>();
+
+const server = Bun.serve<{
+  data: WebSocketData;
+}>({
   port: PORT,
   hostname: HOST,
-  fetch: handleRequest,
+  fetch(req, server) {
+    const url = new URL(req.url);
+    const method = req.method;
+
+    // ========================================================================
+    // WebSocket Upgrade: /api/ralph-loops/:id/ws
+    // ========================================================================
+    if (url.pathname.startsWith("/api/ralph-loops/") && url.pathname.endsWith("/ws")) {
+      const parts = url.pathname.split("/");
+      const loopId = parts[3]; // /api/ralph-loops/:id/ws
+
+      if (!loopId) {
+        return new Response("Missing loop ID", { status: 400 });
+      }
+
+      // Check if loop exists and has active process
+      const proc = ralphService.getProcess(loopId);
+      if (!proc) {
+        return new Response("Loop not found or not running", { status: 404 });
+      }
+
+      // Upgrade to WebSocket
+      const upgraded = server.upgrade(req, {
+        data: { loopId },
+      });
+
+      if (!upgraded) {
+        return new Response("WebSocket upgrade failed", { status: 400 });
+      }
+
+      // Return undefined to signal successful upgrade
+      return undefined;
+    }
+
+    // ========================================================================
+    // Regular HTTP requests
+    // ========================================================================
+    return handleRequest(req);
+  },
+
+  websocket: {
+    data: {} as WebSocketData,
+
+    open(ws) {
+      const { loopId } = ws.data;
+      console.log(`[WebSocket] Connection opened for loop: ${loopId}`);
+
+      const proc = ralphService.getProcess(loopId);
+      if (!proc) {
+        ws.close(1008, "Loop process not found");
+        return;
+      }
+
+      // Pipe Claude stdout → WebSocket
+      const stdoutHandler = (data: Buffer) => {
+        try {
+          ws.send(data.toString());
+        } catch (err) {
+          console.error(`[WebSocket] Error sending to client:`, err);
+        }
+      };
+
+      proc.stdout.on("data", stdoutHandler);
+
+      // Store cleanup function
+      wsConnections.set(ws.remoteAddress + ":" + loopId, {
+        cleanup: () => {
+          proc.stdout.off("data", stdoutHandler);
+        },
+      });
+
+      // Send welcome message
+      ws.send(`[WebSocket] Connected to Ralph loop: ${loopId}\n`);
+      ws.send(`[WebSocket] Messages sent will be relayed to Claude stdin\n`);
+      ws.send(`[WebSocket] ---\n`);
+    },
+
+    message(ws, message) {
+      const { loopId } = ws.data;
+      const proc = ralphService.getProcess(loopId);
+
+      if (!proc || !proc.stdin) {
+        ws.send("[WebSocket] Error: Loop process not available\n");
+        return;
+      }
+
+      // Relay message to Claude stdin
+      try {
+        proc.stdin.write(message.toString() + "\n");
+        console.log(`[WebSocket] Relayed to ${loopId}: ${message.toString().substring(0, 100)}`);
+      } catch (err) {
+        ws.send(`[WebSocket] Error writing to stdin: ${err}\n`);
+      }
+    },
+
+    close(ws, code, reason) {
+      const { loopId } = ws.data;
+      console.log(`[WebSocket] Connection closed for loop: ${loopId} (code: ${code}, reason: ${reason})`);
+
+      // Cleanup pipes
+      const connection = wsConnections.get(ws.remoteAddress + ":" + loopId);
+      if (connection) {
+        connection.cleanup();
+        wsConnections.delete(ws.remoteAddress + ":" + loopId);
+      }
+    },
+
+    drain(ws) {
+      // WebSocket is ready to receive more data
+      // Could implement backpressure handling here if needed
+    },
+
+    error(ws, error) {
+      console.error(`[WebSocket] Error for loop ${ws.data.loopId}:`, error);
+    },
+  },
 });
 
 console.log(`🚀 Node Agent listening on http://${HOST}:${PORT}`);
@@ -534,6 +658,7 @@ console.log(`   POST   /api/ralph-loops`);
 console.log(`   GET    /api/ralph-loops/:id`);
 console.log(`   DELETE /api/ralph-loops/:id`);
 console.log(`   GET    /api/ralph-loops/:id/logs`);
+console.log(`   WS     /api/ralph-loops/:id/ws  (NEW - WebSocket oversight)`);
 console.log();
 
 // ============================================================================
@@ -581,7 +706,6 @@ if (PM_DAEMON_ENABLED) {
 async function startPmDaemon(): Promise<void> {
   try {
     // Initialize services
-    const nodeRegistry = new NodeRegistryService();
     const telegramService = new TelegramService();
     const pmCommands = new PmCommandsService();
     const pmBrain = new PmBrainService();
@@ -589,14 +713,6 @@ async function startPmDaemon(): Promise<void> {
       intervalMs: parseInt(process.env.PM_MONITOR_INTERVAL_MS || "30000", 10),
       stallThresholdMinutes: parseInt(process.env.PM_STALL_THRESHOLD_MINUTES || "10", 10),
     });
-
-    // Load node registry
-    console.log("[PM Daemon] Loading node registry...");
-    await nodeRegistry.loadConfig();
-
-    // Start health checks
-    console.log("[PM Daemon] Starting node health checks...");
-    nodeRegistry.startHealthChecks();
 
     // Test Telegram connection
     console.log("[PM Daemon] Testing Telegram connection...");
@@ -610,15 +726,17 @@ async function startPmDaemon(): Promise<void> {
     // Start PM brain session (persistent conversation memory)
     console.log("[PM Daemon] Starting PM brain session...");
     await pmBrain.start();
-    const brainStats = pmBrain.getSessionStats();
-    console.log(`[PM Daemon] ✓ PM brain session: ${brainStats.sessionId}`);
+    console.log(`[PM Daemon] ✓ PM brain session running`);
+
+    // Get local hostname for startup message
+    const localHostname = await getHostname();
 
     // Send startup notification
     await telegramService.sendText(`🟢 *PM Daemon Online*
 
-Node: ${await getHostname()}
+Node: ${localHostname}
+Mode: Single-node (local)
 Time: ${new Date().toISOString()}
-Nodes registered: ${nodeRegistry.getAllNodes().length}
 `);
 
     // Recent events for context (circular buffer)
@@ -645,7 +763,7 @@ Nodes registered: ${nodeRegistry.getAllNodes().length}
 
         // Handle slash commands
         if (command.command !== "chat") {
-          const response = await pmCommands.executeCommand(command, nodeRegistry.getAllNodes());
+          const response = await pmCommands.executeCommand(command);
           await telegramService.sendText(response.text, {
             parse_mode: response.parse_mode,
             reply_to_message_id: response.reply_to_message_id,
@@ -654,9 +772,7 @@ Nodes registered: ${nodeRegistry.getAllNodes().length}
         }
 
         // Chat messages go to PM brain
-        const nodes = nodeRegistry.getAllNodes();
         const brainResponse = await pmBrain.processMessage(command.raw_text, {
-          nodes,
           events: recentEvents.slice(-5),
         });
 
@@ -671,77 +787,67 @@ Nodes registered: ${nodeRegistry.getAllNodes().length}
     console.log("[PM Daemon] Starting monitor loop...");
     const monitorAbortController = new AbortController();
 
-    pmMonitor.startMonitoring(
-      () => nodeRegistry.getAllNodes(),
-      {
-        signal: monitorAbortController.signal,
-        onEvent: async (event) => {
-          // Add to recent events
-          recentEvents.push(event);
-          if (recentEvents.length > MAX_RECENT_EVENTS) {
-            recentEvents.shift();
-          }
+    pmMonitor.startMonitoring({
+      signal: monitorAbortController.signal,
+      onEvent: async (event) => {
+        // Add to recent events
+        recentEvents.push(event);
+        if (recentEvents.length > MAX_RECENT_EVENTS) {
+          recentEvents.shift();
+        }
 
-          // For high-priority events, notify immediately
-          if (event.priority === "high" || event.priority === "critical") {
-            let message = "";
+        // For high-priority events, notify immediately
+        if (event.priority === "high" || event.priority === "critical") {
+          let message = "";
 
-            switch (event.type) {
-              case "ralph_stalled":
-                message = `⚠️ *Ralph Stalled*
+          switch (event.type) {
+            case "ralph_stalled":
+              message = `⚠️ *Ralph Stalled*
 
 \`${event.data.loop_id}\` on ${event.node_id}
 Stuck at iteration ${event.data.iteration} for ${event.data.stall_duration_minutes} minutes
 
 Last activity: ${event.data.last_activity}
 `;
-                break;
+              break;
 
-              case "ralph_errored":
-                message = `❌ *Ralph Error*
+            case "ralph_errored":
+              message = `❌ *Ralph Error*
 
 \`${event.data.loop_id}\` on ${event.node_id}
 Iteration: ${event.data.iteration}
 
 Error: ${event.data.error_message}
 `;
-                break;
+              break;
 
-              case "node_offline":
-                message = `🔴 *Node Offline*
-
-${event.node_id} is unreachable
-`;
-                break;
-
-              case "node_high_resources":
-                const warnings = event.data.warnings as string[];
-                message = `📊 *High Resource Usage*
-
-${event.node_id}: ${warnings.join(", ")}
-`;
-                break;
-
-              case "ralph_completed":
-                message = `✅ *Ralph Completed*
+            case "ralph_completed":
+              message = `✅ *Ralph Completed*
 
 \`${event.data.loop_id}\` on ${event.node_id}
 Iterations: ${event.data.total_iterations}
 Commits: ${event.data.total_commits}
 Duration: ${Math.floor(event.data.duration_seconds / 60)}m
 `;
-                break;
+              break;
 
-              default:
-                // For other events, let the PM brain decide whether to notify
-                return;
-            }
+            case "node_high_resources":
+              const warnings = event.data.warnings as string[];
+              message = `📊 *High Resource Usage*
 
-            await telegramService.sendText(message);
+${event.node_id}: ${warnings.join(", ")}
+`;
+              break;
+
+            default:
+              // For other events, let the PM brain decide whether to notify
+              return;
           }
-        },
-      }
-    );
+
+          await telegramService.sendText(message);
+        }
+      },
+    });
 
     console.log("[PM Daemon] ✓ All PM Daemon services started");
     console.log("[PM Daemon] 📱 Send /help to the bot for available commands");
@@ -753,7 +859,6 @@ Duration: ${Math.floor(event.data.duration_seconds / 60)}m
       monitorAbortController.abort();
       telegramService.stopPolling();
       pmMonitor.stopMonitoring();
-      nodeRegistry.stopHealthChecks();
 
       // Stop PM brain session
       console.log("[PM Daemon] Stopping PM brain session...");

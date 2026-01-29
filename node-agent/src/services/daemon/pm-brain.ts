@@ -8,8 +8,7 @@ import { spawn } from "child_process";
 import type {
   PmBrainResponse,
   MonitorEvent,
-  RegisteredNode,
-} from "../types/index";
+} from "../../types/index";
 
 const SPAWN_TIMEOUT_MS = 120000; // 2 minutes for spawned sessions
 
@@ -252,7 +251,6 @@ export class PmBrainService {
   async processMessage(
     message: string,
     context?: {
-      nodes?: RegisteredNode[];
       events?: MonitorEvent[];
     }
   ): Promise<PmBrainResponse> {
@@ -272,8 +270,8 @@ export class PmBrainService {
       // Inject context into the message if provided
       let fullMessage = message;
 
-      if (context?.nodes || context?.events) {
-        fullMessage = this.injectContext(message, context);
+      if (context?.events) {
+        fullMessage = this.injectContext(message, context.events);
       }
 
       // Send to persistent Claude process
@@ -293,37 +291,20 @@ export class PmBrainService {
   }
 
   /**
-   * Inject context into message (for monitor events, node status)
+   * Inject context into message (for monitor events)
    */
-  private injectContext(message: string, context: { nodes?: RegisteredNode[]; events?: MonitorEvent[] }): string {
-    const parts: string[] = [];
-
-    // Add node status if provided
-    if (context.nodes) {
-      const onlineNodes = context.nodes.filter((n) => n.status === "online");
-      parts.push(`\n**Current Node Status:**`);
-      parts.push(`Total: ${context.nodes.length} (${onlineNodes.length} online)`);
-
-      if (onlineNodes.length > 0) {
-        parts.push("\nOnline:");
-        for (const node of onlineNodes) {
-          if (node.node_status) {
-            const loops = node.node_status.ralph_loops?.length || 0;
-            const cpu = node.node_status.capacity.cpu_percent;
-            const mem = node.node_status.capacity.memory_percent;
-            parts.push(`- ${node.id}: ${loops} loops, CPU ${cpu}%, Mem ${mem}%`);
-          }
-        }
-      }
+  private injectContext(message: string, events: MonitorEvent[]): string {
+    if (events.length === 0) {
+      return message;
     }
 
+    const parts: string[] = [];
+
     // Add events if provided
-    if (context.events && context.events.length > 0) {
-      parts.push(`\n**Recent Events:**`);
-      for (const event of context.events.slice(-5)) {
-        const time = new Date(event.timestamp).toLocaleTimeString();
-        parts.push(`- [${time}] ${event.type} on ${event.node_id}`);
-      }
+    parts.push(`\n**Recent Events:**`);
+    for (const event of events.slice(-5)) {
+      const time = new Date(event.timestamp).toLocaleTimeString();
+      parts.push(`- [${time}] ${event.type} on ${event.node_id}`);
     }
 
     parts.push(`\n**Message:**`);

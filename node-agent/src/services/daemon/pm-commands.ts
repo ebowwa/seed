@@ -1,16 +1,15 @@
 // PM Commands Service
 // Slash command fallback router - bypasses LLM for fast, deterministic responses
-// Commands: /status, /status <node>, /loops, /start, /stop, /logs, /nodes, /lanes, /health
+// Commands: /status, /loops, /start, /stop, /logs, /lanes, /health
 
 import type {
   PmCommand,
   PmCommandResponse,
   PmCommandHandler,
-  RegisteredNode,
   NodeStatus,
   RalphLoop,
   Worktree,
-} from "../types/index";
+} from "../../types/index";
 
 // API response types matching node-agent HTTP endpoints
 interface NodeApiResponse<T> {
@@ -21,6 +20,8 @@ interface NodeApiResponse<T> {
   };
 }
 
+const LOCALHOST = "127.0.0.1";
+const API_PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
 const API_TIMEOUT_MS = 10000; // 10 seconds
 
 export class PmCommandsService {
@@ -36,19 +37,19 @@ export class PmCommandsService {
   private registerHandlers(): void {
     this.handlers.set("status", {
       command: "status",
-      description: "Show status of all nodes or a specific node",
+      description: "Show node status",
       handler: this.handleStatus.bind(this),
     });
 
     this.handlers.set("loops", {
       command: "loops",
-      description: "List all Ralph loops across all nodes",
+      description: "List all Ralph loops",
       handler: this.handleLoops.bind(this),
     });
 
     this.handlers.set("start", {
       command: "start",
-      description: "Start a Ralph loop on a node",
+      description: "Start a Ralph loop",
       handler: this.handleStart.bind(this),
     });
 
@@ -64,15 +65,9 @@ export class PmCommandsService {
       handler: this.handleLogs.bind(this),
     });
 
-    this.handlers.set("nodes", {
-      command: "nodes",
-      description: "List all registered nodes",
-      handler: this.handleNodes.bind(this),
-    });
-
     this.handlers.set("lanes", {
       command: "lanes",
-      description: "List worktrees on a node",
+      description: "List worktrees",
       handler: this.handleLanes.bind(this),
     });
 
@@ -98,7 +93,7 @@ export class PmCommandsService {
   /**
    * Execute a command
    */
-  async executeCommand(command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
+  async executeCommand(command: PmCommand): Promise<PmCommandResponse> {
     const handler = this.handlers.get(command.command);
 
     if (!handler) {
@@ -108,7 +103,7 @@ export class PmCommandsService {
     }
 
     try {
-      return await handler.handler(command, nodes);
+      return await handler.handler(command);
     } catch (error) {
       console.error(`[PmCommands] Error executing /${command.command}:`, error);
       return {
@@ -129,106 +124,84 @@ export class PmCommandsService {
   // ========================================================================
 
   /**
-   * /status - Show status of all nodes or a specific node
-   * Usage: /status [node_id]
+   * /status - Show node status
    */
-  private async handleStatus(command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    // If node_id specified, show that node's status
-    if (command.args.length > 0) {
-      const nodeId = command.args[0];
-      const node = nodes.find((n) => n.id === nodeId);
+  private async handleStatus(_command: PmCommand): Promise<PmCommandResponse> {
+    const status = await this.fetchLocalStatus();
+    if (!status) {
+      return { text: "Failed to fetch node status" };
+    }
 
-      if (!node) {
-        return {
-          text: `Node not found: ${nodeId}\n\nAvailable nodes:\n${this.formatNodeList(nodes)}`,
-        };
+    const lines: string[] = [
+      `*${status.node_id}*`,
+      "",
+      `Host: ${status.hostname}`,
+      `Tailscale IP: ${status.tailscale_ip}`,
+      "",
+      "*Capacity:*",
+      `  CPU: ${status.capacity.cpu_percent}%`,
+      `  Memory: ${status.capacity.memory_percent}%`,
+      `  Disk: ${status.capacity.disk_percent}%`,
+      "",
+      "*Sessions:*",
+      `  SSH: ${status.sessions.ssh} | tmux: ${status.sessions.tmux} | Claude: ${status.sessions.claude_code}`,
+      "",
+      `*Worktrees:* ${status.worktrees.length}`,
+      `*Ralph Loops:* ${status.ralph_loops.length}`,
+    ];
+
+    if (status.ralph_loops.length > 0) {
+      lines.push("");
+      for (const loop of status.ralph_loops) {
+        lines.push(`  ${this.formatLoopLine(loop)}`);
       }
-
-      return await this.fetchAndFormatNodeStatus(node);
     }
-
-    // Show status of all nodes
-    const lines: string[] = [`*Node Status*`, ""];
-
-    for (const node of nodes) {
-      const statusLine = await this.formatNodeStatusLine(node);
-      lines.push(statusLine);
-    }
-
-    lines.push("");
-    lines.push(`Total: ${nodes.length} nodes`);
 
     return { text: lines.join("\n") };
   }
 
   /**
-   * /loops - List all Ralph loops across all nodes
+   * /loops - List all Ralph loops
    */
-  private async handleLoops(_command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    const lines: string[] = [`*Ralph Loops*`, ""];
-
-    let totalLoops = 0;
-    let runningLoops = 0;
-
-    for (const node of nodes) {
-      if (node.status !== "online") {
-        continue;
-      }
-
-      const loops = await this.fetchNodeLoops(node);
-      if (loops.length > 0) {
-        lines.push(`_${node.id}:_`);
-        for (const loop of loops) {
-          const loopLine = this.formatLoopLine(loop);
-          lines.push(`  ${loopLine}`);
-          totalLoops++;
-          if (loop.status === "running") {
-            runningLoops++;
-          }
-        }
-        lines.push("");
-      }
+  private async handleLoops(_command: PmCommand): Promise<PmCommandResponse> {
+    const status = await this.fetchLocalStatus();
+    if (!status) {
+      return { text: "Failed to fetch node status" };
     }
 
-    if (totalLoops === 0) {
+    const lines: string[] = [`*Ralph Loops*`, ""];
+    const loops = status.ralph_loops || [];
+
+    if (loops.length === 0) {
       lines.push("No Ralph loops running");
     } else {
-      lines.push(`Total: ${totalLoops} loops (${runningLoops} running)`);
+      for (const loop of loops) {
+        lines.push(this.formatLoopLine(loop));
+      }
+      const runningCount = loops.filter(l => l.status === "running").length;
+      lines.push("");
+      lines.push(`Total: ${loops.length} loops (${runningCount} running)`);
     }
 
     return { text: lines.join("\n") };
   }
 
   /**
-   * /start - Start a Ralph loop on a node
-   * Usage: /start <node_id> <worktree_id> <prompt>
+   * /start - Start a Ralph loop
+   * Usage: /start <worktree_id> <prompt>
    */
-  private async handleStart(command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    if (command.args.length < 3) {
+  private async handleStart(command: PmCommand): Promise<PmCommandResponse> {
+    if (command.args.length < 2) {
       return {
-        text: "Usage: /start <node_id> <worktree_id> <prompt>\n\nExample: /start worker-1 auth-fix Fix authentication bug in auth.ts",
+        text: "Usage: /start <worktree_id> <prompt>\n\nExample: /start auth-fix Fix authentication bug in auth.ts",
       };
     }
 
-    const [nodeId, worktreeId, ...promptParts] = command.args;
+    const [worktreeId, ...promptParts] = command.args;
     const prompt = promptParts.join(" ");
 
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) {
-      return {
-        text: `Node not found: ${nodeId}\n\nAvailable nodes:\n${this.formatNodeList(nodes)}`,
-      };
-    }
-
-    if (node.status !== "online") {
-      return {
-        text: `Node is not online: ${nodeId}`,
-      };
-    }
-
     try {
-      const url = `http://${node.host}:${node.port}/api/ralph-loops`;
-      const response = await fetch(url, {
+      const response = await fetch(`http://${LOCALHOST}:${API_PORT}/api/ralph-loops`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
@@ -261,7 +234,7 @@ export class PmCommandsService {
    * /stop - Stop a Ralph loop
    * Usage: /stop <loop_id>
    */
-  private async handleStop(command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
+  private async handleStop(command: PmCommand): Promise<PmCommandResponse> {
     if (command.args.length < 1) {
       return {
         text: "Usage: /stop <loop_id>\n\nExample: /stop auth-fix",
@@ -270,48 +243,33 @@ export class PmCommandsService {
 
     const loopId = command.args[0];
 
-    // Try to find the node running this loop
-    for (const node of nodes) {
-      if (node.status !== "online") {
-        continue;
+    try {
+      const response = await fetch(`http://${LOCALHOST}:${API_PORT}/api/ralph-loops/${loopId}`, {
+        method: "DELETE",
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        return {
+          text: `Failed to stop Ralph loop: HTTP ${response.status}`,
+        };
       }
 
-      const loops = await this.fetchNodeLoops(node);
-      if (loops.find((l) => l.id === loopId)) {
-        try {
-          const url = `http://${node.host}:${node.port}/api/ralph-loops/${loopId}`;
-          const response = await fetch(url, {
-            method: "DELETE",
-            signal: AbortSignal.timeout(API_TIMEOUT_MS),
-          });
-
-          if (!response.ok) {
-            return {
-              text: `Failed to stop Ralph loop: HTTP ${response.status}`,
-            };
-          }
-
-          return {
-            text: `Ralph loop stopped: ${loopId}`,
-          };
-        } catch (error) {
-          return {
-            text: `Failed to stop Ralph loop: ${error instanceof Error ? error.message : String(error)}`,
-          };
-        }
-      }
+      return {
+        text: `Ralph loop stopped: ${loopId}`,
+      };
+    } catch (error) {
+      return {
+        text: `Failed to stop Ralph loop: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
-
-    return {
-      text: `Ralph loop not found: ${loopId}`,
-    };
   }
 
   /**
    * /logs - Get recent logs for a Ralph loop
    * Usage: /logs <loop_id>
    */
-  private async handleLogs(command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
+  private async handleLogs(command: PmCommand): Promise<PmCommandResponse> {
     if (command.args.length < 1) {
       return {
         text: "Usage: /logs <loop_id>\n\nExample: /logs auth-fix",
@@ -320,123 +278,52 @@ export class PmCommandsService {
 
     const loopId = command.args[0];
 
-    // Try to find the node running this loop
-    for (const node of nodes) {
-      if (node.status !== "online") {
-        continue;
+    try {
+      const response = await fetch(`http://${LOCALHOST}:${API_PORT}/api/ralph-loops/${loopId}/logs`, {
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
+
+      if (!response.ok) {
+        return {
+          text: `Failed to fetch logs: HTTP ${response.status}`,
+        };
       }
 
-      const loops = await this.fetchNodeLoops(node);
-      if (loops.find((l) => l.id === loopId)) {
-        try {
-          const url = `http://${node.host}:${node.port}/api/ralph-loops/${loopId}/logs`;
-          const response = await fetch(url, {
-            signal: AbortSignal.timeout(API_TIMEOUT_MS),
-          });
+      const data = (await response.json()) as NodeApiResponse<{ logs: string }>;
+      const logs = data.data!.logs;
 
-          if (!response.ok) {
-            return {
-              text: `Failed to fetch logs: HTTP ${response.status}`,
-            };
-          }
-
-          const data = (await response.json()) as NodeApiResponse<{ logs: string }>;
-          const logs = data.data!.logs;
-
-          // Return last 50 lines
-          const lines = logs.split("\n").slice(-50);
-          return {
-            text: `Logs for ${loopId}:\n\`\`\`\n${lines.join("\n")}\n\`\`\``,
-            parse_mode: "Markdown",
-          };
-        } catch (error) {
-          return {
-            text: `Failed to fetch logs: ${error instanceof Error ? error.message : String(error)}`,
-          };
-        }
-      }
+      // Return last 50 lines
+      const lines = logs.split("\n").slice(-50);
+      return {
+        text: `Logs for ${loopId}:\n\`\`\`\n${lines.join("\n")}\n\`\`\``,
+        parse_mode: "Markdown",
+      };
+    } catch (error) {
+      return {
+        text: `Failed to fetch logs: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
-
-    return {
-      text: `Ralph loop not found: ${loopId}`,
-    };
   }
 
   /**
-   * /nodes - List all registered nodes
+   * /lanes - List worktrees
    */
-  private async handleNodes(_command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    const lines: string[] = [`*Registered Nodes*`, "", this.formatNodeList(nodes)];
-
-    const stats = {
-      online: nodes.filter((n) => n.status === "online").length,
-      offline: nodes.filter((n) => n.status === "offline").length,
-      degraded: nodes.filter((n) => n.status === "degraded").length,
-    };
-
-    lines.push("");
-    lines.push(`Online: ${stats.online} | Offline: ${stats.offline} | Degraded: ${stats.degraded}`);
-
-    return { text: lines.join("\n") };
-  }
-
-  /**
-   * /lanes - List worktrees on a node
-   * Usage: /lanes [node_id]
-   */
-  private async handleLanes(command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    const nodeId = command.args[0];
-
-    if (!nodeId) {
-      // Show worktrees on all nodes
-      const lines: string[] = [`*Worktrees*`, ""];
-
-      for (const node of nodes) {
-        if (node.status !== "online") {
-          continue;
-        }
-
-        const worktrees = await this.fetchNodeWorktrees(node);
-        if (worktrees.length > 0) {
-          lines.push(`_${node.id}:_`);
-          for (const wt of worktrees) {
-            lines.push(`  \`${wt.id}\` - ${wt.branch}`);
-          }
-          lines.push("");
-        }
-      }
-
-      if (lines.length === 2) {
-        lines.push("No worktrees found");
-      }
-
-      return { text: lines.join("\n") };
+  private async handleLanes(_command: PmCommand): Promise<PmCommandResponse> {
+    const status = await this.fetchLocalStatus();
+    if (!status) {
+      return { text: "Failed to fetch node status" };
     }
 
-    // Show worktrees on specific node
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) {
-      return {
-        text: `Node not found: ${nodeId}`,
-      };
-    }
+    const lines: string[] = [`*Worktrees*`, ""];
 
-    if (node.status !== "online") {
-      return {
-        text: `Node is not online: ${nodeId}`,
-      };
-    }
-
-    const worktrees = await this.fetchNodeWorktrees(node);
-    const lines: string[] = [`*Worktrees on ${nodeId}*`, ""];
-
-    if (worktrees.length === 0) {
+    if (status.worktrees.length === 0) {
       lines.push("No worktrees found");
     } else {
-      for (const wt of worktrees) {
+      for (const wt of status.worktrees) {
         lines.push(`\`${wt.id}\` - ${wt.branch}`);
-        if (wt.ralphLoop) {
-          lines.push(`  Ralph: ${wt.ralphLoop.status} (${wt.ralphLoop.iteration} iterations)`);
+        const ralphLoop = status.ralph_loops.find((loop) => loop.worktree_id === wt.id);
+        if (ralphLoop) {
+          lines.push(`  Ralph: ${ralphLoop.status} (${ralphLoop.iteration} iterations)`);
         }
       }
     }
@@ -447,25 +334,25 @@ export class PmCommandsService {
   /**
    * /health - Show PM daemon health status
    */
-  private async handleHealth(_command: PmCommand, nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    const stats = {
-      online: nodes.filter((n) => n.status === "online").length,
-      offline: nodes.filter((n) => n.status === "offline").length,
-      degraded: nodes.filter((n) => n.status === "degraded").length,
-    };
+  private async handleHealth(_command: PmCommand): Promise<PmCommandResponse> {
+    const status = await this.fetchLocalStatus();
 
     const lines: string[] = [
       "*PM Daemon Health*",
       "",
-      `Nodes: ${stats.online}/${nodes.length} online`,
-      `Offline: ${stats.offline} | Degraded: ${stats.degraded}`,
-      "",
-      "*Registered Nodes:*",
+      "Mode: Single-node (local)",
+      `Node: ${status?.node_id || "unknown"}`,
     ];
 
-    for (const node of nodes) {
-      const statusEmoji = node.status === "online" ? "🟢" : node.status === "degraded" ? "🟡" : "🔴";
-      lines.push(`  ${statusEmoji} ${node.id} - ${node.label}`);
+    if (status) {
+      lines.push("");
+      lines.push("*Capacity:*");
+      lines.push(`  CPU: ${status.capacity.cpu_percent}%`);
+      lines.push(`  Memory: ${status.capacity.memory_percent}%`);
+      lines.push(`  Disk: ${status.capacity.disk_percent}%`);
+      lines.push("");
+      lines.push(`*Ralph Loops:* ${status.ralph_loops.length}`);
+      lines.push(`*Worktrees:* ${status.worktrees.length}`);
     }
 
     return { text: lines.join("\n") };
@@ -474,7 +361,7 @@ export class PmCommandsService {
   /**
    * /help - Show available commands
    */
-  private async handleHelp(_command: PmCommand, _nodes: RegisteredNode[]): Promise<PmCommandResponse> {
+  private async handleHelp(_command: PmCommand): Promise<PmCommandResponse> {
     const lines: string[] = [
       "*Available Commands*",
       "",
@@ -493,10 +380,10 @@ export class PmCommandsService {
   /**
    * chat - Non-command messages (forward to PM brain)
    */
-  private async handleChat(command: PmCommand, _nodes: RegisteredNode[]): Promise<PmCommandResponse> {
-    // Return null to indicate this should be handled by the PM brain
+  private async handleChat(_command: PmCommand): Promise<PmCommandResponse> {
+    // Return empty text to signal "forward to brain"
     return {
-      text: "", // Empty response signals "forward to brain"
+      text: "",
     };
   }
 
@@ -505,87 +392,22 @@ export class PmCommandsService {
   // ========================================================================
 
   /**
-   * Format node list
+   * Fetch local node status
    */
-  private formatNodeList(nodes: RegisteredNode[]): string {
-    return nodes
-      .map((n) => {
-        const statusEmoji = n.status === "online" ? "🟢" : n.status === "degraded" ? "🟡" : "🔴";
-        return `${statusEmoji} \`${n.id}\` - ${n.label}`;
-      })
-      .join("\n");
-  }
-
-  /**
-   * Format node status line
-   */
-  private async formatNodeStatusLine(node: RegisteredNode): Promise<string> {
-    const statusEmoji = node.status === "online" ? "🟢" : node.status === "degraded" ? "🟡" : "🔴";
-
-    if (node.status === "online" && node.node_status) {
-      const capacity = node.node_status.capacity;
-      const loops = node.node_status.ralph_loops?.length || 0;
-      return `${statusEmoji} \`${node.id}\` - CPU ${capacity.cpu_percent}% | Mem ${capacity.memory_percent}% | ${loops} loops`;
-    }
-
-    return `${statusEmoji} \`${node.id}\` - ${node.label} (${node.status})`;
-  }
-
-  /**
-   * Fetch and format node status
-   */
-  private async fetchAndFormatNodeStatus(node: RegisteredNode): Promise<PmCommandResponse> {
-    if (node.status !== "online") {
-      return {
-        text: `Node is not online: ${node.id}`,
-      };
-    }
-
+  private async fetchLocalStatus(): Promise<NodeStatus | null> {
     try {
-      const url = `http://${node.host}:${node.port}/api/status`;
-      const response = await fetch(url, {
+      const response = await fetch(`http://${LOCALHOST}:${API_PORT}/api/status`, {
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
 
       if (!response.ok) {
-        return {
-          text: `Failed to fetch status: HTTP ${response.status}`,
-        };
+        return null;
       }
 
       const data = (await response.json()) as NodeApiResponse<NodeStatus>;
-      const status = data.data!;
-
-      const lines: string[] = [
-        `*${status.node_id}*`,
-        "",
-        `Host: ${status.hostname}`,
-        `Tailscale IP: ${status.tailscale_ip}`,
-        "",
-        "*Capacity:*",
-        `  CPU: ${status.capacity.cpu_percent}%`,
-        `  Memory: ${status.capacity.memory_percent}%`,
-        `  Disk: ${status.capacity.disk_percent}%`,
-        "",
-        "*Sessions:*",
-        `  SSH: ${status.sessions.ssh} | tmux: ${status.sessions.tmux} | Claude: ${status.sessions.claude_code}`,
-        "",
-        `*Worktrees:* ${status.worktrees.length}`,
-        `*Ralph Loops:* ${status.ralph_loops.length}`,
-      ];
-
-      if (status.ralph_loops.length > 0) {
-        lines.push("");
-        for (const loop of status.ralph_loops) {
-          lines.push(`  ${this.formatLoopLine(loop)}`);
-        }
-      }
-
-      return { text: lines.join("\n") };
-    } catch (error) {
-      return {
-        text: `Failed to fetch status: ${error instanceof Error ? error.message : String(error)}`,
-      };
+      return data.data || null;
+    } catch {
+      return null;
     }
   }
 
@@ -595,53 +417,5 @@ export class PmCommandsService {
   private formatLoopLine(loop: RalphLoop): string {
     const statusEmoji = loop.status === "running" ? "🔄" : loop.status === "complete" ? "✅" : loop.status === "error" ? "❌" : "⏸️";
     return `${statusEmoji} \`${loop.id}\` - ${loop.status} (iter ${loop.iteration})`;
-  }
-
-  /**
-   * Fetch node loops
-   */
-  private async fetchNodeLoops(node: RegisteredNode): Promise<RalphLoop[]> {
-    try {
-      const url = `http://${node.host}:${node.port}/api/ralph-loops`;
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = (await response.json()) as NodeApiResponse<{ loops: RalphLoop[] }>;
-      return data.data?.loops || [];
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Fetch node worktrees
-   */
-  private async fetchNodeWorktrees(node: RegisteredNode): Promise<Array<Worktree & { ralphLoop?: RalphLoop }>> {
-    try {
-      const url = `http://${node.host}:${node.port}/api/status`;
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
-      });
-
-      if (!response.ok) {
-        return [];
-      }
-
-      const data = (await response.json()) as NodeApiResponse<NodeStatus>;
-      const status = data.data!;
-
-      // Map worktrees with their Ralph loops
-      return status.worktrees.map((wt) => ({
-        ...wt,
-        ralphLoop: status.ralph_loops.find((loop) => loop.worktree_id === wt.id),
-      }));
-    } catch {
-      return [];
-    }
   }
 }

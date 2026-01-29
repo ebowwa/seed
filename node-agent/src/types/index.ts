@@ -273,7 +273,15 @@ export interface TelegramSendMessageParams {
   reply_to_message_id?: number;
 }
 
-// Node Registry Types
+// ============================================================================
+// Node Registry Types (DEFERRED - See docs/NODE-REGISTRY-DESIGN.md)
+// ============================================================================
+
+// Multi-node types deferred until proper multi-node architecture is implemented.
+// Current setup: Each node runs its own PM daemon managing local Ralph loops only.
+// See docs/NODE-REGISTRY-DESIGN.md for complete multi-node design.
+
+/*
 export interface NodeRegistryConfig {
   nodes: NodeConfig[];
 }
@@ -292,6 +300,7 @@ export interface RegisteredNode extends NodeConfig {
   last_seen?: string;
   node_status?: NodeStatus; // Cached node status
 }
+*/
 
 // PM Daemon State Types
 export interface PmDaemonState {
@@ -385,7 +394,7 @@ export interface PmCommandResponse {
 export interface PmCommandHandler {
   command: string;
   description: string;
-  handler: (cmd: PmCommand, nodes: RegisteredNode[]) => Promise<PmCommandResponse>;
+  handler: (cmd: PmCommand) => Promise<PmCommandResponse>;
 }
 
 // PM Brain Types
