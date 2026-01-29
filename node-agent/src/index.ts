@@ -15,11 +15,11 @@ import type {
 } from "./types/index";
 
 // PM Daemon imports (conditionally loaded)
-import { NodeRegistryService } from "./services/node-registry";
-import { TelegramService } from "./services/telegram";
-import { PmCommandsService } from "./services/pm-commands";
-import { PmMonitorService } from "./services/pm-monitor";
-import { PmBrainService } from "./services/pm-brain";
+import { NodeRegistryService } from "./services/daemon/node-registry";
+import { TelegramService } from "./services/daemon/telegram";
+import { PmCommandsService } from "./services/daemon/pm-commands";
+import { PmMonitorService } from "./services/daemon/pm-monitor";
+import { PmBrainService } from "./services/daemon/pm-brain";
 
 // Configuration
 const PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
