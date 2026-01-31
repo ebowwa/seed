@@ -24,6 +24,8 @@ const LOCALHOST = "127.0.0.1";
 const API_PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
 const API_TIMEOUT_MS = 10000; // 10 seconds
 
+// TODO: Add /menu command for persistent quick actions panel
+// TODO: Add /manage command for interactive loop management
 export class PmCommandsService {
   private handlers: Map<string, PmCommandHandler> = new Map();
 
@@ -123,6 +125,8 @@ export class PmCommandsService {
   // Command Handlers
   // ========================================================================
 
+  // TODO: Enrich status with multi-node awareness when node registry exists
+  // TODO: Add inline keyboard buttons for quick actions (restart, logs, etc.)
   /**
    * /status - Show node status
    */
@@ -160,6 +164,8 @@ export class PmCommandsService {
     return { text: lines.join("\n") };
   }
 
+  // TODO: Add interactive buttons per loop (restart, stop, logs, watch)
+  // TODO: Filter/sort options (by status, branch, age)
   /**
    * /loops - List all Ralph loops
    */

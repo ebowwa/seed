@@ -336,6 +336,8 @@ export class PmMonitorService {
     }
   }
 
+  // TODO: Enrich events with context (last commit, error message, file/line)
+  // TODO: Add event grouping to reduce notification spam
   /**
    * Emit a monitor event
    */

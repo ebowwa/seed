@@ -86,6 +86,7 @@ export interface NodeStatus {
   ports: PortInfo[];
   worktrees: Worktree[];
   ralph_loops: RalphLoop[];
+  connection_info?: ConnectionInfo;
 }
 
 export interface Capacity {
@@ -109,6 +110,87 @@ export interface PortInfo {
   state: "listening" | "established";
   process?: string;
   pid?: number;
+}
+
+// ============================================================================
+// Connection Info Types
+//
+// These types describe the internet connection quality metrics returned by
+// getConnectionInfo(). Used in /api/status endpoint to monitor node connectivity.
+//
+// Status Determination:
+//   - "online":    Can reach internet, acceptable quality
+//   - "offline":   Cannot reach internet at all
+//   - "degraded":  Online but poor quality (>500ms latency or >5% packet loss)
+// ============================================================================
+
+export interface ConnectionInfo {
+  /** Overall connection status: online, offline, or degraded */
+  status: "online" | "offline" | "degraded";
+  /** Information about the internet connection source (ISP, location, etc.) */
+  source: ConnectionSource;
+  /** Quality metrics: latency, jitter, packet loss, optional speed test */
+  quality: ConnectionQuality;
+  /** ISO timestamp of when these metrics were gathered */
+  tested_at: string;
+}
+
+export interface ConnectionSource {
+  /** Public IPv4 address (from ipify.org) */
+  public_ip: string;
+  /** Internet Service Provider name (from ip-api.com) */
+  isp?: string;
+  /** Organization name (often same as ISP, sometimes more specific) */
+  org?: string;
+  /** Two-letter country code (e.g., "US", "DE", "NL") */
+  country?: string;
+  /** City name (when available from IP geolocation) */
+  city?: string;
+  /** True if connection appears to be via VPN/VPS (detected via AS patterns) */
+  is_vpn: boolean;
+  /** True if connection is via Tor network (not currently implemented) */
+  is_tor: boolean;
+  /** True if IP is flagged as a proxy (from ip-api.com) */
+  is_proxy: boolean;
+}
+
+export interface ConnectionQuality {
+  /** Latency measurements to various endpoints (lower is better) */
+  latency_ms: {
+    /** Ping time to 1.1.1.1 (Cloudflare DNS) */
+    google: number | null;
+    /** Ping time to 8.8.8.8 (Google DNS) */
+    cloudflare: number | null;
+    /** Ping time to hetzner.com (VPS provider) */
+    hetzner: number | null;
+    /** Average latency across all successful pings */
+    average: number | null;
+  };
+  /**
+   * Jitter (latency variance) in milliseconds
+   * Lower = more stable connection
+   *   < 10ms: Excellent
+   *   10-30ms: Good
+   *   > 30ms: Poor (noticeable lag in real-time apps)
+   */
+  jitter_ms: number | null;
+  /**
+   * Packet loss percentage (0-100)
+   *   0%: Excellent
+   *   1-2%: Acceptable (normal for WiFi/cellular)
+   *   >5%: Problematic (buffering, disconnects)
+   */
+  packet_loss_percent: number | null;
+  /**
+   * Download speed in Mbps (optional, requires INCLUDE_SPEED_TEST=true)
+   * Not populated by default due to ~10s test duration
+   */
+  download_mbps?: number | null;
+  /**
+   * Upload speed in Mbps (optional, not yet implemented)
+   * Would require upload test to speedtest server
+   */
+  upload_mbps?: number | null;
 }
 
 // ============================================================================

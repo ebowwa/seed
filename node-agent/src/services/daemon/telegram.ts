@@ -28,6 +28,8 @@ export interface TelegramPollOptions {
   signal?: AbortSignal;
 }
 
+// TODO: Add command history (/!, /!n to recall previous commands)
+// TODO: Add conversation modes (verbose/brief/monitor)
 export class TelegramService {
   private token: string;
   private allowedChatId: number;
@@ -147,6 +149,9 @@ export class TelegramService {
     }
   }
 
+  // TODO: Add inline keyboard support for interactive buttons
+  // TODO: Add editMessageText() for updating existing messages
+  // TODO: Add answerCallbackQuery() for button click handling
   /**
    * Send a message to Telegram
    */
@@ -183,6 +188,7 @@ export class TelegramService {
     });
   }
 
+  // TODO: Handle callback_query for inline keyboard interactions
   /**
    * Parse a command from a Telegram message
    */
@@ -222,6 +228,7 @@ export class TelegramService {
     };
   }
 
+  // TODO: Support streaming responses for long-running operations
   /**
    * Start polling for updates (long polling)
    */

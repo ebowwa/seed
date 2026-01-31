@@ -244,6 +244,8 @@ export class DaemonLayerAgentService {
     return this.persistentSession?.isRunning() ?? false;
   }
 
+  // TODO: Use @codespaces/ai for GLM-4.7 diagnostic prompts
+  // TODO: Use Prompt Builder for enriched alert templates
   /**
    * Process a message through the persistent session
    * Claude Code handles all memory and context

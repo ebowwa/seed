@@ -2,6 +2,7 @@
 
 import { RalphService } from "./services/ralph";
 import { GitService } from "./services/git";
+import { TailscaleService } from "@codespaces/tailscale";
 import type {
   NodeStatus,
   CreateWorktreeRequest,
@@ -12,6 +13,7 @@ import type {
   PortInfo,
   PmCommand,
   MonitorEvent,
+  ConnectionInfo,
 } from "./types/index";
 
 // PM Daemon imports (conditionally loaded)
@@ -27,6 +29,7 @@ const HOST = process.env.NODE_AGENT_HOST || "0.0.0.0";
 // Services
 const gitService = new GitService();
 const ralphService = new RalphService();
+const tailscaleService = new TailscaleService();
 
 // ============================================================================
 // Utility Functions
@@ -96,6 +99,7 @@ async function handleRequest(req: Request): Promise<Response> {
         ports: await getActivePorts(),
         worktrees,
         ralph_loops: ralphLoops,
+        connection_info: await getConnectionInfo(),
       };
 
       return jsonResponse(status, { headers });
@@ -103,7 +107,15 @@ async function handleRequest(req: Request): Promise<Response> {
 
     // ========================================================================
     // GET /api/worktrees
-    // TODO: Worktree CRUD endpoints not tested with actual git worktrees
+    //
+    // NOTE: Worktree CRUD endpoints implemented but require integration testing:
+    // - GitService wraps `git worktree` commands (list, add, remove)
+    // - Needs real git repository at REPOS_BASE_PATH (~/repos by default)
+    // - Test scenario: clone repo, create worktree, spawn Ralph, verify isolation
+    //
+    // Test setup:
+    //   cd ~/repos && git clone <repo> main-repo
+    //   curl -X POST http://localhost:8911/api/worktrees -d '{"id":"test","branch":"main"}'
     // ========================================================================
     if (url.pathname === "/api/worktrees" && method === "GET") {
       const worktrees = await gitService.listWorktrees();
@@ -209,6 +221,101 @@ async function handleRequest(req: Request): Promise<Response> {
         return jsonResponse({ logs }, { headers });
       } catch {
         return jsonResponse({ logs: "" }, { headers });
+      }
+    }
+
+    // ========================================================================
+    // GET /api/tailscale/status
+    // ========================================================================
+    if (url.pathname === "/api/tailscale/status" && method === "GET") {
+      try {
+        const status = await tailscaleService.getStatus();
+        return jsonResponse({ success: true, status }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to get Tailscale status");
+      }
+    }
+
+    // ========================================================================
+    // GET /api/tailscale/ips
+    // ========================================================================
+    if (url.pathname === "/api/tailscale/ips" && method === "GET") {
+      try {
+        const ips = await tailscaleService.getIPs();
+        return jsonResponse({ success: true, ips }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to get Tailscale IPs");
+      }
+    }
+
+    // ========================================================================
+    // GET /api/tailscale/peers
+    // ========================================================================
+    if (url.pathname === "/api/tailscale/peers" && method === "GET") {
+      try {
+        const peers = await tailscaleService.getPeers();
+        return jsonResponse({ success: true, peers }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to get Tailscale peers");
+      }
+    }
+
+    // ========================================================================
+    // GET /api/tailscale/peers/online
+    // ========================================================================
+    if (url.pathname === "/api/tailscale/peers/online" && method === "GET") {
+      try {
+        const peers = await tailscaleService.getOnlinePeers();
+        return jsonResponse({ success: true, peers }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to get online peers");
+      }
+    }
+
+    // ========================================================================
+    // POST /api/tailscale/ping
+    // ========================================================================
+    if (url.pathname === "/api/tailscale/ping" && method === "POST") {
+      try {
+        const body = await req.json();
+        if (!body.target) {
+          return errorResponse("INVALID_REQUEST", "Missing required field: target");
+        }
+
+        const count = body.count || 5;
+        const result = await tailscaleService.ping(body.target, count);
+        return jsonResponse({ success: true, result }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to ping peer");
+      }
+    }
+
+    // ========================================================================
+    // GET /api/tailscale/info
+    // ========================================================================
+    if (url.pathname === "/api/tailscale/info" && method === "GET") {
+      try {
+        const info = await tailscaleService.getTailnetInfo();
+        return jsonResponse({ success: true, info }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to get tailnet info");
+      }
+    }
+
+    // ========================================================================
+    // GET /api/tailscale/whois/:ip
+    // ========================================================================
+    if (url.pathname.startsWith("/api/tailscale/whois/") && method === "GET") {
+      try {
+        const ip = url.pathname.split("/").pop();
+        if (!ip) {
+          return errorResponse("INVALID_REQUEST", "Missing IP address");
+        }
+
+        const info = await tailscaleService.whois(ip);
+        return jsonResponse({ success: true, info }, { headers });
+      } catch (error) {
+        return errorResponse("TAILSCALE_ERROR", error instanceof Error ? error.message : "Failed to lookup IP");
       }
     }
 
@@ -498,6 +605,248 @@ async function getActivePorts() {
 }
 
 // ============================================================================
+// Connection Info
+//
+// Gathers comprehensive internet connection quality metrics for the node:
+//
+// 1. Connectivity Status: online | offline | degraded
+//    - Determined by HTTP reachability tests
+//    - Degraded: high latency (>500ms) or packet loss (>5%)
+//
+// 2. Connection Source:
+//    - Public IP address via ipify.org
+//    - ISP/org/location via ip-api.com (free, no auth)
+//    - VPN/Proxy/Tor detection via AS name patterns
+//
+// 3. Connection Quality:
+//    - Latency to Google DNS, Cloudflare DNS, Hetzner
+//    - Jitter (latency variance - network stability indicator)
+//    - Packet loss percentage (10-ping sample)
+//    - Optional speed test (set INCLUDE_SPEED_TEST=true)
+//
+// Environment Variables:
+//   - INCLUDE_SPEED_TEST=true  Enable download speed test (~10s slower)
+//
+// Returns: ConnectionInfo object with all metrics
+// ============================================================================
+
+async function getConnectionInfo() {
+  const result = {
+    status: "online" as "online" | "offline" | "degraded",
+    source: {
+      public_ip: "" as string,
+      isp: undefined as string | undefined,
+      org: undefined as string | undefined,
+      country: undefined as string | undefined,
+      city: undefined as string | undefined,
+      is_vpn: false,
+      is_tor: false,
+      is_proxy: false,
+    },
+    quality: {
+      latency_ms: {
+        google: null as number | null,
+        cloudflare: null as number | null,
+        hetzner: null as number | null,
+        average: null as number | null,
+      },
+      jitter_ms: null as number | null,
+      packet_loss_percent: null as number | null,
+      download_mbps: undefined as number | undefined,
+      upload_mbps: undefined as number | undefined,
+    },
+    tested_at: new Date().toISOString(),
+  };
+
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    // ========================================================================
+    // 1. Check if online (connectivity test)
+    //
+    // Tests connectivity by attempting HTTPS connection to reliable DNS servers.
+    // Falls back to secondary endpoint if primary fails. Returns early with
+    // "offline" status if both fail, skipping remaining tests.
+    // ========================================================================
+    let isOnline = false;
+    try {
+      // Quick DNS check + HTTP test to Cloudflare (fast)
+      // Tries 1.1.1.1 (Cloudflare) first, falls back to 8.8.8.8 (Google)
+      await execAsync("curl -s -o /dev/null -w '%{http_code}' --max-time 3 https://1.1.1.1 2>/dev/null || curl -s -o /dev/null -w '%{http_code}' --max-time 3 https://8.8.8.8 2>/dev/null");
+      isOnline = true;
+    } catch {
+      result.status = "offline";
+      return result;
+    }
+
+    // ========================================================================
+    // 2. Get public IP and ISP info
+    //
+    // Two-step process:
+    // a) ipify.org - Fast, reliable public IP lookup
+    // b) ip-api.com - Detailed geolocation and ISP info (free tier, rate limited)
+    //
+    // VPN Detection: Analyzes AS (Autonomous System) name for hosting patterns
+    //    e.g., "DIGITALOCEAN-ASN", "Hetzner Online GmbH", "Amazon AWS"
+    // ========================================================================
+    try {
+      // Try ipify first for IP only (fast, reliable, no rate limit issues)
+      const ipCheck = await execAsync("curl -s --max-time 3 https://api.ipify.org 2>/dev/null");
+      result.source.public_ip = ipCheck.stdout.trim() || "";
+
+      // Get detailed info from ip-api.com (free, no key needed, rate limited to 45/min)
+      // Fields requested: status, country, city, isp, org, as (ASN), hosting, proxy, mobile
+      if (result.source.public_ip) {
+        const ipInfo = await execAsync(`curl -s --max-time 5 "http://ip-api.com/json/${result.source.public_ip}?fields=status,message,country,city,isp,org,as,hosting,proxy,mobile" 2>/dev/null`);
+        const info = JSON.parse(ipInfo.stdout);
+
+        if (info.status === "success") {
+          result.source.isp = info.isp || undefined;
+          result.source.org = info.org || undefined;
+          result.source.country = info.country || undefined;
+          result.source.city = info.city || undefined;
+          result.source.is_proxy = info.proxy || false;
+
+          // Detect VPN: look for common VPN hosting patterns in AS name
+          // VPN providers typically use datacenter IPs, not residential
+          const asName = (info.as || "").toLowerCase();
+          const hostingPatterns = ["hosting", "vpn", "vps", "cloud", "dedicated", "datacenter"];
+          result.source.is_vpn = hostingPatterns.some(p => asName.includes(p)) || info.hosting || false;
+        }
+      }
+    } catch {
+      // If detailed lookup fails, we still have the IP from ipify
+      // Continue without geolocation data
+    }
+
+    // ========================================================================
+    // 3. Measure latency to multiple endpoints
+    //
+    // Pings three well-connected endpoints to measure network latency:
+    // - 1.1.1.1 (Cloudflare DNS) - Typically fastest, global anycast
+    // - 8.8.8.8 (Google DNS) - Reliable fallback
+    // - hetzner.com - Popular VPS provider, relevant for our infrastructure
+    //
+    // Jitter: Standard deviation of ping times (lower = more stable)
+    //   - < 10ms: Excellent (gaming/real-time ready)
+    //   - 10-30ms: Good (video calls acceptable)
+    //   - > 30ms: Poor (noticeable lag, jittery voice)
+    // ========================================================================
+    const latencyTests = [
+      { name: "google", host: "1.1.1.1" },     // Cloudflare DNS (more reliable than Google for ping)
+      { name: "cloudflare", host: "8.8.8.8" },  // Google DNS
+      { name: "hetzner", host: "hetzner.com" }, // Hetzner
+    ];
+
+    const latencies: number[] = [];
+
+    for (const test of latencyTests) {
+      try {
+        // Ping 3 times and get average
+        // macOS: tail -1 | awk '{print $4}' | cut -d'/' -f2  extracts avg from "round-trip min/avg/max/stddev"
+        // Linux: tail -1 | awk -F'/' '{print $5}'                extracts avg from same format
+        const pingCmd = process.platform === "darwin"
+          ? `ping -c 3 -t 2 ${test.host} 2>/dev/null | tail -1 | awk '{print $4}' | cut -d'/' -f2`
+          : `ping -c 3 -W 2 ${test.host} 2>/dev/null | tail -1 | awk -F'/' '{print $5}'`;
+
+        const { stdout } = await execAsync(pingCmd);
+        const latency = parseFloat(stdout.trim());
+        if (!isNaN(latency)) {
+          result.quality.latency_ms[test.name as keyof typeof result.quality.latency_ms] = Math.round(latency);
+          latencies.push(latency);
+        }
+      } catch {
+        // Ping failed, skip this endpoint
+      }
+    }
+
+    // Calculate average latency across all successful pings
+    if (latencies.length > 0) {
+      result.quality.latency_ms.average = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
+
+      // Calculate jitter (standard deviation - measures network stability)
+      // High jitter = inconsistent latency = poor experience for real-time apps
+      const avg = result.quality.latency_ms.average;
+      const variance = latencies.reduce((sum, lat) => sum + Math.pow(lat - avg, 2), 0) / latencies.length;
+      result.quality.jitter_ms = Math.round(Math.sqrt(variance));
+    }
+
+    // ========================================================================
+    // 4. Packet loss detection
+    //
+    // Sends 10 pings to Google DNS and measures how many were lost.
+    // Packet loss indicates network congestion, faulty equipment, or bad routing.
+    //
+    // Interpretation:
+    //   - 0%: Excellent (normal for wired connections)
+    //   - 1-2%: Acceptable (normal for WiFi/cellular)
+    //   - >5%: Problematic (noticeable issues: buffering, disconnects)
+    // ========================================================================
+    try {
+      const packetLossCmd = process.platform === "darwin"
+        ? `ping -c 10 -t 2 8.8.8.8 2>/dev/null | grep 'packet loss' | awk '{print $6}' | sed 's/%//'`
+        : `ping -c 10 -W 2 8.8.8.8 2>/dev/null | grep 'packet loss' | awk -F'%' '{print $1}' | awk '{print $NF}'`;
+
+      const { stdout } = await execAsync(packetLossCmd);
+      const packetLoss = parseFloat(stdout.trim());
+      if (!isNaN(packetLoss)) {
+        result.quality.packet_loss_percent = Math.round(packetLoss);
+      }
+    } catch {
+      // Packet loss test failed
+    }
+
+    // ========================================================================
+    // 5. Optional speed test (slow - only if explicitly requested)
+    //
+    // Downloads a 10MB test file from Tele2's speedtest server.
+    // This adds ~10 seconds to the status request, so it's opt-in only.
+    //
+    // Enable by setting: INCLUDE_SPEED_TEST=true
+    //
+    // Note: This is a single-threaded download test. Real-world speeds may vary
+    // due to multi-connection optimizations used by browsers/download managers.
+    // ========================================================================
+    if (process.env.INCLUDE_SPEED_TEST === "true") {
+      try {
+        // Download test using curl to a fast CDN
+        const downloadStart = Date.now();
+        await execAsync("curl -s -o /dev/null --max-time 10 http://speedtest.tele2.net/10MB.zip 2>/dev/null");
+        const downloadTime = (Date.now() - downloadStart) / 1000; // seconds
+        const downloadMbps = (10 * 8) / downloadTime; // 10MB * 8 bits / seconds
+        result.quality.download_mbps = Math.round(downloadMbps);
+      } catch {
+        // Speed test failed
+      }
+    }
+
+    // ========================================================================
+    // 6. Determine overall connection status
+    //
+    // "online":    All tests passed, acceptable latency/packet loss
+    // "offline":   Cannot reach internet (caught in step 1)
+    // "degraded":  Online but poor quality (high latency or packet loss)
+    // ========================================================================
+    if (result.quality.latency_ms.average !== null) {
+      // Thresholds: >500ms latency OR >5% packet loss = degraded
+      // These thresholds are conservative - may need adjustment based on use case
+      if (result.quality.latency_ms.average > 500 || (result.quality.packet_loss_percent !== null && result.quality.packet_loss_percent > 5)) {
+        result.status = "degraded";
+      }
+    }
+
+  } catch (error) {
+    // If anything unexpected fails, mark as degraded rather than crashing
+    console.error("[ConnectionInfo] Error gathering connection info:", error);
+    result.status = "degraded";
+  }
+
+  return result;
+}
+
+// ============================================================================
 // Server
 // ============================================================================
 
@@ -535,6 +884,18 @@ const server = Bun.serve<{
 
     // ========================================================================
     // WebSocket Upgrade: /api/ralph-loops/:id/ws
+    //
+    // Provides real-time bidirectional communication with running Ralph loops:
+    // - Client → WebSocket → Claude stdin (send prompts/commands)
+    // - Claude stdout → WebSocket → Client (stream responses)
+    //
+    // Usage: ws://localhost:8911/api/ralph-loops/<loopId>/ws
+    //
+    // Connection lifecycle:
+    // 1. Verifies loop exists and has active process
+    // 2. Pipes proc.stdout → ws.send()
+    // 3. Relays ws messages → proc.stdin
+    // 4. Cleans up pipes on connection close
     // ========================================================================
     if (url.pathname.startsWith("/api/ralph-loops/") && url.pathname.endsWith("/ws")) {
       const parts = url.pathname.split("/");
@@ -658,7 +1019,14 @@ console.log(`   POST   /api/ralph-loops`);
 console.log(`   GET    /api/ralph-loops/:id`);
 console.log(`   DELETE /api/ralph-loops/:id`);
 console.log(`   GET    /api/ralph-loops/:id/logs`);
-console.log(`   WS     /api/ralph-loops/:id/ws  (NEW - WebSocket oversight)`);
+console.log(`   WS     /api/ralph-loops/:id/ws  (WebSocket: bidirectional stdio relay to active Ralph process)`);
+console.log(`   GET    /api/tailscale/status`);
+console.log(`   GET    /api/tailscale/ips`);
+console.log(`   GET    /api/tailscale/peers`);
+console.log(`   GET    /api/tailscale/peers/online`);
+console.log(`   POST   /api/tailscale/ping`);
+console.log(`   GET    /api/tailscale/info`);
+console.log(`   GET    /api/tailscale/whois/:ip`);
 console.log();
 
 // ============================================================================
