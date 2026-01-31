@@ -1,8 +1,41 @@
-// PM Brain Service
-// The AI brain of the PM daemon - a persistent Claude Code session
+// ============================================================================
+// DaemonLayerAgentService - PM Daemon AI Brain
+// ============================================================================
 //
-// DESIGN: Simple stdin/stdout pipe to Claude Code.
-// Claude handles memory, context, everything. We just deliver messages.
+// PURPOSE: Manages persistent Claude Code sessions for the Project Manager daemon
+//
+// ARCHITECTURE:
+//   ┌─────────────────────────────────────────────────────────────┐
+//   │                    DaemonLayerAgentService                   │
+//   │  ┌──────────────────────────────────────────────────────┐  │
+//   │  │         PersistentClaudeSession                       │  │
+//   │  │  • Long-running Claude Code process via doppler       │  │
+//   │  │  • stdin/stdout communication pipe                    │  │
+//   │  │  • Auto-restart on crash                              │  │
+//   │  │  • Memory/context handled by Claude                  │  │
+//   │  └──────────────────────────────────────────────────────┘  │
+//   │                                                             │
+//   │  • spawnWorker() - One-off Claude sessions                │
+//   │  • spawnWorkers() - Parallel workers                      │
+//   └─────────────────────────────────────────────────────────────┘
+//
+// INTEGRATION POINTS for @codespaces/tooling:
+//   1. start() - Run tooling.sync() on startup to ensure repos are current
+//   2. processMessage() - Check tooling.status() for context before processing
+//   3. spawnWorker() - Validate tooling state before spawning workers
+//   4. Add new methods: syncRepos(), validateRepos(), getRepoStatus()
+//
+// CONFIGURATION:
+//   - dopplerProject: Doppler project name (default: "seed")
+//   - dopplerConfig: Doppler config (default: "prd")
+//   - cwd: Working directory for Claude sessions
+//
+// TODO: Add tooling integration
+//   - import { ToolingService } from "@codespaces/tooling"
+//   - Call tooling.sync() during start()
+//   - Expose tooling status via API
+//
+// ============================================================================
 
 import { spawn } from "child_process";
 import type {
@@ -12,14 +45,27 @@ import type {
 
 const SPAWN_TIMEOUT_MS = 120000; // 2 minutes for spawned sessions
 
+// ============================================================================
+// Configuration
+// ============================================================================
+
 export interface PmBrainConfig {
   dopplerProject?: string;
   dopplerConfig?: string;
   cwd?: string;
 }
 
+// ============================================================================
+// PersistentClaudeSession
+// ============================================================================
 /**
  * Manages a single persistent Claude Code process with stdin/stdout communication
+ * 
+ * This class maintains a long-running Claude Code session that:
+ * - Survives multiple requests (memory/context preserved)
+ * - Auto-restarts on crashes
+ * - Communicates via stdin/stdout pipes
+ * - Handles timeout and graceful shutdown
  */
 class PersistentClaudeSession {
   private process: ReturnType<typeof spawn> | null = null;
@@ -35,6 +81,11 @@ class PersistentClaudeSession {
 
   /**
    * Start the persistent Claude Code process
+   * 
+   * Spawns: doppler run --project <proj> --config <cfg> -- claude
+   * - Uses doppler to inject secrets
+   * - Pipes stdin/stdout/stderr
+   * - Sets up auto-restart on crash
    */
   async start(): Promise<void> {
     if (this.process) {
@@ -121,9 +172,9 @@ class PersistentClaudeSession {
 
   /**
    * Extract Claude's response from buffer
+   * Removes ANSI escape codes for clean output
    */
   private extractResponse(buffer: string): string {
-    // Remove ANSI escape codes
     const ansiRegex = /\x1b\[[0-9;]*m/g;
     let cleaned = buffer.replace(ansiRegex, "");
     return cleaned.trim();
@@ -131,6 +182,8 @@ class PersistentClaudeSession {
 
   /**
    * Send a message to Claude and wait for response
+   * 
+   * INTEGRATION POINT: Could inject tooling status here for context
    */
   async sendMessage(message: string): Promise<string> {
     if (!this.process || !this.isReady) {
@@ -161,6 +214,7 @@ class PersistentClaudeSession {
 
   /**
    * Shutdown the persistent session
+   * Attempts graceful SIGTERM, then SIGKILL after 5 seconds
    */
   async shutdown(): Promise<void> {
     this.isShutdown = true;
@@ -192,10 +246,27 @@ class PersistentClaudeSession {
   }
 }
 
+// ============================================================================
+// DaemonLayerAgentService
+// ============================================================================
+
+/**
+ * Main service for managing PM daemon's AI brain
+ * 
+ * RESPONSIBILITIES:
+ * - Maintains persistent Claude Code session for context/memory
+ * - Spawns one-off worker sessions for parallel tasks
+ * - Processes incoming messages with monitor event context
+ * 
+ * INTEGRATION: Add tooling methods here (syncRepos, getRepoStatus, etc.)
+ */
 export class DaemonLayerAgentService {
   private config: Required<PmBrainConfig>;
   private persistentSession: PersistentClaudeSession | null = null;
   private isProcessing: boolean = false;
+
+  // TODO: Add tooling service
+  // private tooling?: ToolingService;
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
@@ -207,12 +278,21 @@ export class DaemonLayerAgentService {
 
   /**
    * Start the PM brain with persistent Claude Code session
+   * 
+   * INTEGRATION POINT: Call tooling.sync() here to ensure repos are current
+   * TODO: 
+   *   - Initialize tooling service
+   *   - Run await this.tooling.sync() on startup
    */
   async start(): Promise<void> {
     if (this.persistentSession) {
       console.warn("[PmBrain] Already started");
       return;
     }
+
+    // TODO: Initialize and sync tooling
+    // this.tooling = new ToolingService();
+    // await this.tooling.sync();
 
     this.persistentSession = new PersistentClaudeSession({
       dopplerProject: this.config.dopplerProject,
@@ -247,6 +327,11 @@ export class DaemonLayerAgentService {
   /**
    * Process a message through the persistent session
    * Claude Code handles all memory and context
+   * 
+   * INTEGRATION POINT: Could inject tooling status into context
+   * TODO:
+   *   - Check tooling.status() for repo state
+   *   - Inject dirty/uncommitted states into context
    */
   async processMessage(
     message: string,
@@ -273,6 +358,10 @@ export class DaemonLayerAgentService {
       if (context?.events) {
         fullMessage = this.injectContext(message, context.events);
       }
+
+      // TODO: Could inject tooling status here
+      // const repoStatus = await this.tooling?.getStatus();
+      // fullMessage += `\n\nRepo Status:\n${JSON.stringify(repoStatus, null, 2)}`;
 
       // Send to persistent Claude process
       const responseText = await this.persistentSession.sendMessage(fullMessage);
@@ -316,9 +405,18 @@ export class DaemonLayerAgentService {
   /**
    * Spawn a fresh Claude Code session for a one-off task
    * Returns response without affecting persistent session
+   * 
+   * INTEGRATION POINT: Validate tooling state before spawning
+   * TODO: Check tooling.validate() before running workers
    */
   async spawnWorker(prompt: string): Promise<string> {
     console.log("[PmBrain] Spawning worker Claude...");
+
+    // TODO: Validate environment before spawning
+    // const isValid = await this.tooling?.validate();
+    // if (!isValid.valid) {
+    //   throw new Error(`Environment invalid: ${isValid.errors.join(', ')}`);
+    // }
 
     return new Promise((resolve, reject) => {
       const args = [
@@ -379,6 +477,12 @@ export class DaemonLayerAgentService {
 
   /**
    * Get session stats
+   * 
+   * TODO: Add tooling status to stats
+   * return {
+   *   running: this.isRunning(),
+   *   repos: await this.tooling?.getStatus(),
+   * };
    */
   getSessionStats(): {
     running: boolean;
@@ -387,4 +491,29 @@ export class DaemonLayerAgentService {
       running: this.isRunning(),
     };
   }
+
+  // ============================================================================
+  // TODO: Add tooling integration methods
+  // ============================================================================
+  
+  /**
+   * Sync all repos to latest
+   * async syncRepos(): Promise<void> {
+   *   await this.tooling?.sync();
+   * }
+   */
+  
+  /**
+   * Get current repo status
+   * async getRepoStatus(): Promise<RepoStatus> {
+   *   return await this.tooling?.getStatus();
+   * }
+   */
+  
+  /**
+   * Validate environment
+   * async validate(): Promise<ValidationResult> {
+   *   return await this.tooling?.validate();
+   * }
+   */
 }
