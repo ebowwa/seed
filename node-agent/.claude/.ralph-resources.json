@@ -1,0 +1,52 @@
+{
+  "cpu": {
+    "count": 8,
+    "model": "Apple M1",
+    "speed": 2400,
+    "tier": "medium",
+    "arch": "arm64",
+    "loadAverage": [
+      1.9296875,
+      1.791015625,
+      1.70263671875
+    ]
+  },
+  "memory": {
+    "total": 8,
+    "free": 0.07,
+    "used": 7.93,
+    "usedPercent": 99.17,
+    "totalBytes": 8589934592,
+    "freeBytes": 70909952,
+    "tier": "low"
+  },
+  "disk": {
+    "path": "/Users/ebowwa/Desktop/codespaces/seed/node-agent",
+    "total": 228.27,
+    "used": 215.56,
+    "available": 12.71,
+    "usedPercent": 94.43,
+    "tier": "low"
+  },
+  "platform": {
+    "platform": "darwin",
+    "type": "Darwin",
+    "release": "24.6.0",
+    "arch": "arm64",
+    "hostname": "Elijahs-MacBook-Air-3.local",
+    "isContainer": false,
+    "isVM": false,
+    "containerType": null,
+    "homedir": "/Users/ebowwa",
+    "tmpdir": "/var/folders/y9/phbpbrms0k53d21w4d003wj00000gn/T"
+  },
+  "repo": {
+    "kb": 19440,
+    "mb": 18.98,
+    "gb": 0.02,
+    "tier": "small"
+  },
+  "activeSessions": 0,
+  "timestamp": "2026-01-29T07:01:49.194Z",
+  "cached": false
+}

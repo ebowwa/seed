@@ -211,3 +211,215 @@ export interface ProcessInfo {
   loop_id: string;
   started_at: string;
 }
+
+// ============================================================================
+// PM Daemon Types
+// ============================================================================
+
+// Telegram Bot API Types
+export interface TelegramUpdate {
+  update_id: number;
+  message?: TelegramMessage;
+  edited_message?: TelegramMessage;
+  channel_post?: TelegramMessage;
+  edited_channel_post?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+}
+
+export interface TelegramMessage {
+  message_id: number;
+  from: TelegramUser;
+  chat: TelegramChat;
+  date: number;
+  text?: string;
+  entities?: TelegramMessageEntity[];
+}
+
+export interface TelegramUser {
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+}
+
+export interface TelegramChat {
+  id: number;
+  type: "private" | "group" | "supergroup" | "channel";
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  title?: string;
+}
+
+export interface TelegramMessageEntity {
+  type: "mention" | "hashtag" | "bot_command" | "url" | "email" | "bold" | "italic";
+  offset: number;
+  length: number;
+}
+
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string;
+}
+
+export interface TelegramSendMessageParams {
+  chat_id: number;
+  text: string;
+  parse_mode?: "Markdown" | "MarkdownV2" | "HTML";
+  disable_web_page_preview?: boolean;
+  reply_to_message_id?: number;
+}
+
+// ============================================================================
+// Node Registry Types (DEFERRED - See docs/NODE-REGISTRY-DESIGN.md)
+// ============================================================================
+
+// Multi-node types deferred until proper multi-node architecture is implemented.
+// Current setup: Each node runs its own PM daemon managing local Ralph loops only.
+// See docs/NODE-REGISTRY-DESIGN.md for complete multi-node design.
+
+/*
+export interface NodeRegistryConfig {
+  nodes: NodeConfig[];
+}
+
+export interface NodeConfig {
+  id: string;
+  host: string; // Tailscale IP or hostname
+  port: number;
+  label: string;
+  location?: string; // e.g., "nbg1", "fsn1", "hel1"
+  server_type?: string; // e.g., "cax21", "cpx21"
+}
+
+export interface RegisteredNode extends NodeConfig {
+  status: "online" | "offline" | "degraded";
+  last_seen?: string;
+  node_status?: NodeStatus; // Cached node status
+}
+*/
+
+// PM Daemon State Types
+export interface PmDaemonState {
+  enabled: boolean;
+  started_at: string;
+  telegram_connected: boolean;
+  monitor_running: boolean;
+  nodes_online: number;
+  nodes_total: number;
+  active_loops: number;
+}
+
+export interface PmDaemonConfig {
+  telegram_bot_token: string;
+  telegram_chat_id: number;
+  monitor_interval_ms: number;
+  stall_threshold_minutes: number;
+  enable_proactive_actions: boolean;
+  nodes_config_path: string;
+}
+
+// Monitor Event Types
+export type MonitorEventType =
+  | "ralph_started"
+  | "ralph_completed"
+  | "ralph_errored"
+  | "ralph_stalled"
+  | "ralph_milestone"
+  | "node_online"
+  | "node_offline"
+  | "node_degraded"
+  | "node_high_resources"
+  | "pm_started";
+
+export interface MonitorEvent {
+  type: MonitorEventType;
+  timestamp: string;
+  node_id: string;
+  data: Record<string, unknown>;
+  priority: "low" | "medium" | "high" | "critical";
+}
+
+export interface RalphStallEvent extends MonitorEvent {
+  type: "ralph_stalled";
+  data: {
+    loop_id: string;
+    worktree_id: string;
+    iteration: number;
+    last_activity: string;
+    stall_duration_minutes: number;
+  };
+}
+
+export interface RalphCompletionEvent extends MonitorEvent {
+  type: "ralph_completed";
+  data: {
+    loop_id: string;
+    worktree_id: string;
+    total_iterations: number;
+    total_commits: number;
+    duration_seconds: number;
+  };
+}
+
+export interface RalphErrorEvent extends MonitorEvent {
+  type: "ralph_errored";
+  data: {
+    loop_id: string;
+    worktree_id: string;
+    iteration: number;
+    error_message: string;
+  };
+}
+
+// Command Types
+export interface PmCommand {
+  command: string;
+  args: string[];
+  raw_text: string;
+  chat_id: number;
+  message_id: number;
+  user_id: number;
+}
+
+export interface PmCommandResponse {
+  text: string;
+  parse_mode?: "Markdown" | "HTML";
+  reply_to_message_id?: number;
+}
+
+export interface PmCommandHandler {
+  command: string;
+  description: string;
+  handler: (cmd: PmCommand) => Promise<PmCommandResponse>;
+}
+
+// PM Brain Types
+export interface PmBrainMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: string;
+}
+
+export interface PmBrainResponse {
+  text: string;
+  actions?: PmBrainAction[];
+  context?: Record<string, unknown>;
+}
+
+export type PmBrainAction =
+  | { type: "start_ralph"; node_id: string; worktree_id: string; prompt: string }
+  | { type: "stop_ralph"; loop_id: string; node_id: string }
+  | { type: "create_worktree"; node_id: string; branch: string }
+  | { type: "delete_worktree"; node_id: string; worktree_id: string }
+  | { type: "send_notification"; text: string; priority: "low" | "medium" | "high" };
+
+export interface PmBrainSession {
+  session_id: string;
+  started_at: string;
+  messages: PmBrainMessage[];
+  last_activity: string;
+}

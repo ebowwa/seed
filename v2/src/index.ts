@@ -164,7 +164,7 @@ async function main() {
   );
   const bunTool = toolsToInstall.find((t) => t.name === "bun");
   const bunDependentTools = toolsToInstall.filter((t) =>
-    ["lane", "node-agent"].includes(t.name)
+    ["lane", "node-agent", "ralph"].includes(t.name)
   );
   const aptTools = toolsToInstall.filter((t) =>
     ["node", "tmux", "gh"].includes(t.name)
@@ -299,7 +299,7 @@ async function main() {
 
   // ============================================================================
   // PHASE 3: bun-dependent tools (require bun for build/install)
-  // Tools: lane, node-agent
+  // Tools: lane, node-agent, ralph
   // ============================================================================
   if (bunDependentTools.length > 0) {
     const phaseStart = performance.now();

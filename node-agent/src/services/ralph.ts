@@ -28,7 +28,8 @@ const RALPH_SCAN_DIRS = [
 
 export class RalphService {
   private gitService: GitService;
-  private processes: Map<string, number> = new Map();
+  private pids: Map<string, number> = new Map();
+  private activeProcesses: Map<string, { process: ReturnType<typeof spawn>, stdout: Readable, stdin: Writable }> = new Map();
 
   constructor() {
     this.gitService = new GitService();
@@ -379,7 +380,7 @@ export class RalphService {
     };
     await fsp.writeFile(settingsFile, JSON.stringify(settingsContent, null, 2));
 
-    // Start Claude Code process
+    // Start Claude Code process with piped stdio for WebSocket oversight
     const dopplerProject = process.env.DOPPLER_PROJECT || "seed";
     const dopplerConfig = process.env.DOPPLER_CONFIG || "prd";
 
@@ -393,25 +394,45 @@ export class RalphService {
       "claude",
     ];
 
+    // Use piped stdio to capture stdout/stdin for WebSocket streaming
+    // Note: Don't use detached mode since we need to keep process handles
     const options = {
       cwd: worktree.path,
-      detached: true,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"] as const,
     };
 
     const child = spawn("doppler", args, options);
-    child.unref();
+
+    if (!child.pid || !child.stdin || !child.stdout) {
+      throw new Error("PROCESS_START_FAILED");
+    }
+
+    // Store process handle for WebSocket access
+    this.activeProcesses.set(loopId, {
+      process: child,
+      stdout: child.stdout,
+      stdin: child.stdin,
+    });
+
+    // Handle process exit - cleanup
+    child.on("exit", (code) => {
+      console.log(`[RalphService] Loop ${loopId} exited with code ${code}`);
+      this.pids.delete(loopId);
+      this.activeProcesses.delete(loopId);
+    });
+
+    child.on("error", (err) => {
+      console.error(`[RalphService] Loop ${loopId} error:`, err);
+      this.pids.delete(loopId);
+      this.activeProcesses.delete(loopId);
+    });
 
     // Wait a moment to ensure it started
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    if (!child.pid) {
-      throw new Error("PROCESS_START_FAILED");
-    }
-
     // Save PID
     await fsp.writeFile(pidFile, child.pid.toString());
-    this.processes.set(loopId, child.pid);
+    this.pids.set(loopId, child.pid);
 
     // Log the start
     const logEntry = `[${new Date().toISOString()}] Started Ralph Iterative loop with PID: ${child.pid}\n`;
@@ -465,7 +486,8 @@ export class RalphService {
       }
 
       await fsp.unlink(pidFile);
-      this.processes.delete(loopId);
+      this.pids.delete(loopId);
+    this.activeProcesses.delete(loopId);
 
       const logEntry = `[${new Date().toISOString()}] Stopped Ralph loop (PID: ${pid})\n`;
       await fsp.appendFile(logFile, logEntry);
@@ -713,5 +735,13 @@ ${state.prompt}
       case "K": return value / (1024 * 1024);
       default: return value;
     }
+  }
+
+  /**
+   * Get process handle for WebSocket oversight
+   * Returns { stdin, stdout } for bidirectional communication with a running Ralph loop
+   */
+  getProcess(loopId: string): { process: ReturnType<typeof spawn>, stdout: Readable, stdin: Writable } | undefined {
+    return this.activeProcesses.get(loopId);
   }
 }
