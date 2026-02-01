@@ -92,17 +92,24 @@ async function handleRequest(req: Request): Promise<Response> {
       consoleLogger.updateRalphLoops(ralphLoops);
 
       const hostname = await getHostname();
+      const capacity = await getCapacity();
+      const { processes: claudeProcesses, totalCpuPercent: claudeCpuTotal } = await getActiveClaudeProcesses();
 
       const status: NodeStatus = {
         node_id: hostname,
         hostname,
         tailscale_ip: getTailscaleIP(),
-        capacity: await getCapacity(),
+        capacity: {
+          ...capacity,
+          claude_cpu_total: Math.round(claudeCpuTotal * 10) / 10,
+          claude_process_count: claudeProcesses.length,
+        },
         sessions: await getSessions(),
         ports: await getActivePorts(),
         worktrees,
         ralph_loops: ralphLoops,
         console_logs: consoleLogger.getRecentLogs(20),
+        active_claude_processes: claudeProcesses,
       };
 
       return jsonResponse(status, { headers });
@@ -345,6 +352,91 @@ function getTailscaleIP(): string {
     return ip || "unknown";
   } catch {
     return "unknown";
+  }
+}
+
+async function getActiveClaudeProcesses(): Promise<{
+  processes: Array<{
+    pid: number;
+    worktreeId?: string;
+    loopId?: string;
+    startTime: Date;
+    command: string;
+    cpuPercent: number;
+    memoryPercent: number;
+  }>;
+  totalCpuPercent: number;
+}> {
+  try {
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    // Get all Claude/doppler processes with CPU and memory using ps
+    // ps output format: PID, %CPU, %MEM, COMMAND
+    const { stdout: psOutput } = await execAsync(
+      'ps aux | grep -E "[c]laude|[d]oppler.*claude" | awk \'{print $2, $3, $4, $11, $12, $13, $14, $15}\''
+    );
+
+    const lines = psOutput.trim().split('\n').filter(l => l.trim());
+    const processes: Array<{
+      pid: number;
+      worktreeId?: string;
+      loopId?: string;
+      startTime: Date;
+      command: string;
+      cpuPercent: number;
+      memoryPercent: number;
+    }> = [];
+    let totalCpuPercent = 0;
+
+    // Get PID files to map PIDs to loop IDs
+    const pidDir = '/root/.node-agent/pids';
+    let pidToLoopId: Record<number, string> = {};
+    try {
+      const { readdirSync, readFileSync } = await import('fs');
+      const files = readdirSync(pidDir).filter((f: string) => f.endsWith('.pid'));
+      for (const file of files) {
+        const loopId = file.replace('.pid', '');
+        try {
+          const pid = parseInt(readFileSync(`${pidDir}/${file}`, 'utf-8').trim());
+          if (!isNaN(pid)) {
+            pidToLoopId[pid] = loopId;
+          }
+        } catch {
+          // Ignore individual file read errors
+        }
+      }
+    } catch {
+      // No PID files directory or inaccessible
+    }
+
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 4) continue;
+
+      const [pidStr, cpuStr, memStr, ...cmdParts] = parts;
+      const pid = parseInt(pidStr);
+      const cpuPercent = parseFloat(cpuStr) || 0;
+      const memoryPercent = parseFloat(memStr) || 0;
+      const command = cmdParts.join(' ').substring(0, 200); // Limit command length
+
+      if (!isNaN(pid)) {
+        processes.push({
+          pid,
+          loopId: pidToLoopId[pid],
+          startTime: new Date(), // We could fetch actual start time from ps if needed
+          command,
+          cpuPercent,
+          memoryPercent,
+        });
+        totalCpuPercent += cpuPercent;
+      }
+    }
+
+    return { processes, totalCpuPercent };
+  } catch {
+    return { processes: [], totalCpuPercent: 0 };
   }
 }
 

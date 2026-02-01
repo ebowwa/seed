@@ -93,6 +93,7 @@ export interface NodeStatus {
   worktrees: Worktree[];
   ralph_loops: RalphLoop[];
   console_logs?: ConsoleLogEntry[];
+  active_claude_processes?: ClaudeCodeProcess[];
 }
 
 export interface Capacity {
@@ -101,6 +102,8 @@ export interface Capacity {
   disk_percent: number;
   processes: number;
   load_average: number[];
+  claude_cpu_total?: number;  // Total CPU % used by all Claude processes
+  claude_process_count?: number;  // Number of active Claude processes
 }
 
 export interface Sessions {
@@ -229,6 +232,8 @@ export interface ClaudeCodeProcess {
   loopId?: string;
   startTime: Date;
   command: string;
+  cpuPercent?: number;  // CPU usage percentage for this process
+  memoryPercent?: number;  // Memory usage percentage for this process
 }
 
 export interface PluginStatus {
