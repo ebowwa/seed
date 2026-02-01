@@ -58,6 +58,9 @@ export class RalphService {
   async listRalphLoops(): Promise<RalphLoop[]> {
     const loops: RalphLoop[] = [];
 
+    // Get actively running Claude Code processes (by checking activeProcesses Map)
+    const runningProcessIds = Array.from(this.activeProcesses.keys());
+
     // Scan for Ralph Iterative JSON state files
     const iterativeFiles = await this.findRalphIterativeStateFiles();
 
@@ -66,16 +69,34 @@ export class RalphService {
         const content = await fsp.readFile(filePath, "utf-8");
         const state: RalphIterativeStateFile = JSON.parse(content);
 
-        // Determine status from SLAM phase
-        let status: "starting" | "running" | "complete" | "error" | "stopped" = "running";
+        // Determine status from SLAM phase AND whether process is actually running
+        let status: "starting" | "running" | "complete" | "error" | "stopped" = "stopped";
+        const loopId = `${projectName}-${state.iteration}`;
+        const isProcessRunning = this.activeProcesses.has(loopId) ||
+                                 (this.pids.get(loopId) && await this.isProcessRunning(this.pids.get(loopId)!));
+
         if (state.slam?.phase === "complete") {
           status = "complete";
         } else if (state.slam?.phase === "planning") {
-          status = "starting";
+          status = isProcessRunning ? "starting" : "stopped";
+        } else if (isProcessRunning) {
+          status = "running";
+        }
+
+        // Skip loops that are complete AND not running (cleanup old completed loops)
+        if (status === "complete" && !isProcessRunning) {
+          // Optionally: delete old state files for completed loops
+          // await fsp.unlink(filePath);
+          continue;
+        }
+
+        // Skip stopped loops unless they're the most recent one for this project
+        if (status === "stopped") {
+          continue;
         }
 
         // Generate ID from project name and file path
-        const id = `${projectName}-${state.iteration}`;
+        const id = loopId;
 
         // Extract subtask info
         const subtasks = state.slam?.subtasks || [];
@@ -98,6 +119,9 @@ export class RalphService {
         // Get git info (remote and branch)
         const gitInfo = await this.getGitInfo(projectDir);
 
+        // Get PID if process is running
+        const processId = this.pids.get(id);
+
         loops.push({
           id,
           worktree_id: projectName,
@@ -108,6 +132,7 @@ export class RalphService {
           completion_promise: state.promise || null,
           started_at: state.startTime,
           last_activity: state.lastUpdate,
+          process_id,
           project_path: projectPath,
           git_info: gitInfo,
           // Ralph Iterative specific fields
@@ -157,6 +182,21 @@ export class RalphService {
         } else if (state.active) {
           // State file says active but no PID file = orphaned
           status = "stopped";
+        }
+
+        // Skip complete and stopped loops - only return actively running loops
+        if (status === "stopped") {
+          continue;
+        }
+
+        // For complete loops, only include if they just finished recently (last 5 minutes)
+        if (status === "complete") {
+          const now = Date.now();
+          const completedAt = new Date(state.started_at).getTime();
+          const hoursSinceComplete = (now - completedAt) / (1000 * 60 * 60);
+          if (hoursSinceComplete > 0.1) { // 6 minutes
+            continue; // Skip old completed loops
+          }
         }
 
         // Get recent commits
