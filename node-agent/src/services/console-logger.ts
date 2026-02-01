@@ -46,6 +46,9 @@ export class ConsoleLoggerService {
   private knownPids: Set<number> = new Set();
   private logBuffer: ConsoleLogEntry[] = [];
   private readonly MAX_LOG_ENTRIES = 100;
+  private originalConsoleLog: typeof console.log = console.log.bind(console);
+  private originalConsoleError: typeof console.error = console.error.bind(console);
+  private loggingActive = false;
 
   constructor() {}
 
@@ -72,29 +75,6 @@ export class ConsoleLoggerService {
   }
 
   /**
-   * Log to both console and buffer
-   */
-  private log(message: string): void {
-    console.log(message);
-    this.addLog("info", message);
-  }
-
-  private logSuccess(message: string): void {
-    console.log(message);
-    this.addLog("success", message);
-  }
-
-  private logWarning(message: string): void {
-    console.log(message);
-    this.addLog("warning", message);
-  }
-
-  private logError(message: string): void {
-    console.error(message);
-    this.addLog("error", message);
-  }
-
-  /**
    * Start periodic console logging
    */
   startLogging(): void {
@@ -102,7 +82,22 @@ export class ConsoleLoggerService {
       return; // Already logging
     }
 
-    console.log(`
+    // Override console.log to capture all output
+    if (!this.loggingActive) {
+      console.log = (...args: unknown[]) => {
+        const message = args.map(String).join(" ");
+        this.addLog("info", message);
+        this.originalConsoleLog(...args);
+      };
+      console.error = (...args: unknown[]) => {
+        const message = args.map(String).join(" ");
+        this.addLog("error", message);
+        this.originalConsoleError(...args);
+      };
+      this.loggingActive = true;
+    }
+
+    this.originalConsoleLog(`
 ${BOX_CHARS.topLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.topRight}
 ${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
 ${BOX_CHARS.vertical}   📊 Enhanced Console Logging Started                            ${BOX_CHARS.vertical}
@@ -127,8 +122,16 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log("\n📊 Enhanced Console Logging Stopped\n");
     }
+
+    // Restore original console functions
+    if (this.loggingActive) {
+      console.log = this.originalConsoleLog;
+      console.error = this.originalConsoleError;
+      this.loggingActive = false;
+    }
+
+    this.originalConsoleLog("\n📊 Enhanced Console Logging Stopped\n");
   }
 
   /**
