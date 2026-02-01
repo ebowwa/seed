@@ -2,6 +2,7 @@
 
 import { RalphService } from "./services/ralph";
 import { GitService } from "./services/git";
+import { ConsoleLoggerService } from "./services/console-logger";
 import type {
   NodeStatus,
   CreateWorktreeRequest,
@@ -23,10 +24,12 @@ import { DaemonLayerAgentService } from "./services/daemon/daemon-layer-agent";
 // Configuration
 const PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
 const HOST = process.env.NODE_AGENT_HOST || "0.0.0.0";
+const CONSOLE_LOGGING_ENABLED = process.env.CONSOLE_LOGGING_ENABLED !== "false"; // Enabled by default
 
 // Services
 const gitService = new GitService();
 const ralphService = new RalphService();
+const consoleLogger = new ConsoleLoggerService();
 
 // ============================================================================
 // Utility Functions
@@ -84,6 +87,9 @@ async function handleRequest(req: Request): Promise<Response> {
     if (url.pathname === "/api/status" && method === "GET") {
       const worktrees = await gitService.listWorktrees();
       const ralphLoops = await ralphService.listRalphLoops();
+
+      // Update console logger with latest Ralph loops
+      consoleLogger.updateRalphLoops(ralphLoops);
 
       const hostname = await getHostname();
 
@@ -660,6 +666,14 @@ console.log(`   DELETE /api/ralph-loops/:id`);
 console.log(`   GET    /api/ralph-loops/:id/logs`);
 console.log(`   WS     /api/ralph-loops/:id/ws  (NEW - WebSocket oversight)`);
 console.log();
+
+// Start enhanced console logging if enabled
+if (CONSOLE_LOGGING_ENABLED) {
+  consoleLogger.startLogging();
+} else {
+  console.log("📊 Console logging disabled (set CONSOLE_LOGGING_ENABLED=true to enable)");
+  console.log();
+}
 
 // ============================================================================
 // PM Daemon Startup (Conditional)

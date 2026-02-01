@@ -12,6 +12,7 @@ import type {
   RalphLoopCommit,
 } from "../types/index";
 import { GitService } from "./git";
+import { ConsoleLoggerService } from "./console-logger";
 
 const execAsync = promisify(exec);
 
@@ -28,11 +29,13 @@ const RALPH_SCAN_DIRS = [
 
 export class RalphService {
   private gitService: GitService;
+  private consoleLogger: ConsoleLoggerService;
   private pids: Map<string, number> = new Map();
   private activeProcesses: Map<string, { process: ReturnType<typeof spawn>, stdout: Readable, stdin: Writable }> = new Map();
 
   constructor() {
     this.gitService = new GitService();
+    this.consoleLogger = new ConsoleLoggerService();
     this.ensureDirectories();
   }
 
@@ -417,12 +420,14 @@ export class RalphService {
     // Handle process exit - cleanup
     child.on("exit", (code) => {
       console.log(`[RalphService] Loop ${loopId} exited with code ${code}`);
+      this.consoleLogger.logProcessStop(child.pid);
       this.pids.delete(loopId);
       this.activeProcesses.delete(loopId);
     });
 
     child.on("error", (err) => {
       console.error(`[RalphService] Loop ${loopId} error:`, err);
+      this.consoleLogger.logProcessStop(child.pid);
       this.pids.delete(loopId);
       this.activeProcesses.delete(loopId);
     });
@@ -434,7 +439,10 @@ export class RalphService {
     await fsp.writeFile(pidFile, child.pid.toString());
     this.pids.set(loopId, child.pid);
 
-    // Log the start
+    // Log the start with console logger
+    this.consoleLogger.logProcessStart(child.pid, worktree.id, loopId);
+
+    // Also log to file
     const logEntry = `[${new Date().toISOString()}] Started Ralph Iterative loop with PID: ${child.pid}\n`;
     await fsp.appendFile(logFile, logEntry);
 
@@ -487,7 +495,10 @@ export class RalphService {
 
       await fsp.unlink(pidFile);
       this.pids.delete(loopId);
-    this.activeProcesses.delete(loopId);
+      this.activeProcesses.delete(loopId);
+
+      // Log the stop with console logger
+      this.consoleLogger.logProcessStop(pid);
 
       const logEntry = `[${new Date().toISOString()}] Stopped Ralph loop (PID: ${pid})\n`;
       await fsp.appendFile(logFile, logEntry);

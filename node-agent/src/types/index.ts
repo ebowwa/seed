@@ -213,6 +213,32 @@ export interface ProcessInfo {
 }
 
 // ============================================================================
+// Console Logging Types
+// ============================================================================
+
+export interface ClaudeCodeProcess {
+  pid: number;
+  worktreeId?: string;
+  loopId?: string;
+  startTime: Date;
+  command: string;
+}
+
+export interface PluginStatus {
+  name: string;
+  type: "mcp" | "skill" | "hook";
+  status: "active" | "inactive" | "error";
+  details?: string;
+}
+
+export interface ConsoleLogState {
+  claudeProcesses: ClaudeCodeProcess[];
+  ralphLoops: RalphLoop[];
+  plugins: PluginStatus[];
+  lastUpdate: Date;
+}
+
+// ============================================================================
 // PM Daemon Types
 // ============================================================================
 
