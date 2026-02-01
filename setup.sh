@@ -227,3 +227,59 @@ elif [ -d "${NODE_AGENT_PATH}" ] && [ -f "${SERVICE_FILE}" ]; then
 else
     print_warning "node-agent or service file not found, skipping systemd setup"
 fi
+
+# ============================================================================
+# Ralph Iterative Plugin Setup
+# ============================================================================
+
+print_info "Checking Ralph Iterative plugin..."
+
+RALPH_REPO="${HOME}/repos/ralph"
+RALPH_PLUGIN_DIR="${RALPH_REPO}/.claude-plugin"
+
+# Check if ralph repo exists
+if [ -d "${RALPH_REPO}" ]; then
+    # Setup Ralph Iterative commands and skills
+    if [ -f "${SCRIPT_DIR}/setup-ralph-iterative.sh" ]; then
+        print_info "Setting up Ralph Iterative plugin..."
+        bash "${SCRIPT_DIR}/setup-ralph-iterative.sh"
+    else
+        # Inline setup if script doesn't exist
+        print_info "Symlinking Ralph Iterative commands..."
+
+        mkdir -p "${RALPH_PLUGIN_DIR}/commands"
+        mkdir -p "${RALPH_PLUGIN_DIR}/skills"
+
+        # Symlink commands
+        for cmd_file in "${RALPH_REPO}/plugins/ralph-iterative/commands"/*.md; do
+            if [ -f "$cmd_file" ]; then
+                ln -sf "$cmd_file" "${RALPH_PLUGIN_DIR}/commands/$(basename "$cmd_file")"
+            fi
+        done
+
+        # Symlink skills
+        for skill_dir in "${RALPH_REPO}/plugins/ralph-iterative/skills"/*/; do
+            if [ -d "$skill_dir" ]; then
+                ln -sf "$skill_dir" "${RALPH_PLUGIN_DIR}/skills/$(basename "$skill_dir")"
+            fi
+        done
+
+        print_success "Ralph Iterative plugin configured"
+        print_info "  Commands: /go, /quit, /ralph-iterative-status"
+    fi
+else
+    print_warning "ralph repo not found, skipping Ralph Iterative setup"
+    print_info "  Clone with: git clone https://github.com/ebowwa/ralph.git ${RALPH_REPO}"
+fi
+
+# ============================================================================
+# Setup Complete
+# ============================================================================
+
+echo ""
+print_success "Seed setup complete!"
+echo ""
+print_info "Quick start commands:"
+echo "  doppler run --project seed --config prd -- claude"
+echo "  doppler run --project seed --config prd -- claude '/go \"task\" --completion-promise DONE' -p"
+echo ""

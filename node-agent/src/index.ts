@@ -102,6 +102,7 @@ async function handleRequest(req: Request): Promise<Response> {
         ports: await getActivePorts(),
         worktrees,
         ralph_loops: ralphLoops,
+        console_logs: consoleLogger.getRecentLogs(20),
       };
 
       return jsonResponse(status, { headers });

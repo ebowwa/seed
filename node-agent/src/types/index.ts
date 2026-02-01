@@ -77,6 +77,12 @@ export interface CreateRalphLoopRequest {
 // Node Status Types
 // ============================================================================
 
+export interface ConsoleLogEntry {
+  timestamp: string;
+  level: "info" | "success" | "warning" | "error";
+  message: string;
+}
+
 export interface NodeStatus {
   node_id: string;
   hostname: string;
@@ -86,6 +92,7 @@ export interface NodeStatus {
   ports: PortInfo[];
   worktrees: Worktree[];
   ralph_loops: RalphLoop[];
+  console_logs?: ConsoleLogEntry[];
 }
 
 export interface Capacity {

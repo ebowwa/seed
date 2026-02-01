@@ -32,14 +32,67 @@ const BOX_CHARS = {
   cross: "╬",
 };
 
+export interface ConsoleLogEntry {
+  timestamp: string;
+  level: "info" | "success" | "warning" | "error";
+  message: string;
+}
+
 export class ConsoleLoggerService {
   private ralphLoops: RalphLoop[] = [];
   private claudeProcesses: ClaudeCodeProcess[] = [];
   private plugins: PluginStatus[] = [];
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private knownPids: Set<number> = new Set();
+  private logBuffer: ConsoleLogEntry[] = [];
+  private readonly MAX_LOG_ENTRIES = 100;
 
   constructor() {}
+
+  /**
+   * Get recent log entries
+   */
+  getRecentLogs(limit: number = 20): ConsoleLogEntry[] {
+    return this.logBuffer.slice(-limit);
+  }
+
+  /**
+   * Add an entry to the log buffer
+   */
+  private addLog(level: ConsoleLogEntry["level"], message: string): void {
+    this.logBuffer.push({
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+    });
+    // Keep buffer size limited
+    if (this.logBuffer.length > this.MAX_LOG_ENTRIES) {
+      this.logBuffer.shift();
+    }
+  }
+
+  /**
+   * Log to both console and buffer
+   */
+  private log(message: string): void {
+    console.log(message);
+    this.addLog("info", message);
+  }
+
+  private logSuccess(message: string): void {
+    console.log(message);
+    this.addLog("success", message);
+  }
+
+  private logWarning(message: string): void {
+    console.log(message);
+    this.addLog("warning", message);
+  }
+
+  private logError(message: string): void {
+    console.error(message);
+    this.addLog("error", message);
+  }
 
   /**
    * Start periodic console logging

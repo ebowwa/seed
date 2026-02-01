@@ -43,6 +43,47 @@ cd seed
 | **Web Search MCP** | Real-time web search (Z.ai) |
 | **GitHub MCP** | Repository intelligence |
 | **chat.sh** | Persistent Claude conversations |
+| **Ralph Iterative** | "Mr. Meeseeks Mode" - Autonomous AI loops |
+| **Node Agent** | Multi-node Ralph orchestration (port 8911) |
+
+## Ralph Iterative - "Mr. Meeseeks Mode"
+
+Ralph Iterative is a Claude Code plugin that relentlessly iterates on tasks until completion.
+
+**Quick Start:**
+
+```bash
+# Install Ralph Iterative (runs automatically during setup)
+./setup-ralph-iterative.sh
+
+# Run a Ralph loop
+doppler run --project seed --config prd -- claude '/go "Fix the authentication bug" --completion-promise BUG_FIXED' -p
+
+# Check status
+doppler run --project seed --config prd -- claude '/ralph-iterative-status' -p
+
+# Stop a loop
+doppler run --project seed --config prd -- claude '/quit' -p
+```
+
+**Key Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/go` | Start Ralph loop |
+| `/quit` | Stop active loop |
+| `/ralph-iterative-status` | Show session status |
+| `/ralph-iterative-history` | Show session history |
+| `/ralph-iterative-resume` | Resume a session |
+
+**Features:**
+- ✅ Loops indefinitely until completion signal
+- ✅ Tracks state in `.claude/.ralph-iterative.local.json`
+- ✅ Monitored by Node Agent (GUI dashboard)
+- ✅ SLAM subagents (planner, executor, paranoid, reviewer)
+- ✅ Git integration (auto-commit, PRs)
+
+📖 **Full Documentation:** [RALPH-ITERATIVE-SETUP.md](./RALPH-ITERATIVE-SETUP.md)
 
 ## Configuration
 
@@ -134,6 +175,7 @@ ssh ebowwa-deptwar "cd ~/seed && ./chat.sh 'your prompt'"
 
 ## Docs
 
+- [Ralph Iterative Setup](./RALPH-ITERATIVE-SETUP.md)
 - [Claude Code Skills](./docs/Claude_Code_Skills.md)
 - [GLM Models Comparison](./docs/GLM_Models_Comparison.md)
 - [GitHub MCP Integration](./docs/GitHub_MCP_Integration.md)
