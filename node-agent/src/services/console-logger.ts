@@ -1,4 +1,4 @@
-// Console Logging Service - Enhanced Status Display
+// Console Logging Service - Simple status logging
 
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -15,22 +15,6 @@ const execAsync = promisify(exec);
 
 // Configuration
 const LOG_INTERVAL_MS = 30000; // Log every 30 seconds
-const NODE_AGENT_DIR = path.join(process.env.HOME || "", ".node-agent");
-
-// Box-drawing characters for nice formatting
-const BOX_CHARS = {
-  topLeft: "╔",
-  topRight: "╗",
-  bottomLeft: "╚",
-  bottomRight: "╝",
-  horizontal: "═",
-  vertical: "║",
-  leftT: "╠",
-  rightT: "╣",
-  topT: "╦",
-  bottomT: "╩",
-  cross: "╬",
-};
 
 export interface ConsoleLogEntry {
   timestamp: string;
@@ -68,7 +52,6 @@ export class ConsoleLoggerService {
       level,
       message,
     });
-    // Keep buffer size limited
     if (this.logBuffer.length > this.MAX_LOG_ENTRIES) {
       this.logBuffer.shift();
     }
@@ -79,7 +62,7 @@ export class ConsoleLoggerService {
    */
   startLogging(): void {
     if (this.intervalId) {
-      return; // Already logging
+      return;
     }
 
     // Override console.log to capture all output
@@ -97,14 +80,7 @@ export class ConsoleLoggerService {
       this.loggingActive = true;
     }
 
-    this.originalConsoleLog(`
-${BOX_CHARS.topLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.topRight}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   📊 Enhanced Console Logging Started                            ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   Refreshing every ${LOG_INTERVAL_MS / 1000}s                                          ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight}
-`);
+    this.originalConsoleLog("[NodeAgent] Console logging started (every 30s)");
 
     // Initial log
     this.logStatus();
@@ -124,14 +100,13 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
       this.intervalId = null;
     }
 
-    // Restore original console functions
     if (this.loggingActive) {
       console.log = this.originalConsoleLog;
       console.error = this.originalConsoleError;
       this.loggingActive = false;
     }
 
-    this.originalConsoleLog("\n📊 Enhanced Console Logging Stopped\n");
+    this.originalConsoleLog("[NodeAgent] Console logging stopped");
   }
 
   /**
@@ -146,36 +121,16 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
    */
   logProcessStart(pid: number, worktreeId?: string, loopId?: string): void {
     if (this.knownPids.has(pid)) {
-      return; // Already logged this PID
+      return;
     }
 
     this.knownPids.add(pid);
 
-    const timestamp = new Date().toISOString();
-    const worktreeInfo = worktreeId ? ` (worktree: ${worktreeId})` : "";
-    const loopInfo = loopId ? ` (loop: ${loopId})` : "";
+    const parts = ["Claude Code process started", `PID:${pid}`];
+    if (worktreeId) parts.push(`worktree:${worktreeId}`);
+    if (loopId) parts.push(`loop:${loopId}`);
 
-    console.log(`
-${BOX_CHARS.topLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.topRight}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   🚀 New Claude Code Process Started                             ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   PID:         ${pid}${" ".repeat(68 - pid.toString().length)}${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   Timestamp:   ${timestamp}${" ".repeat(68 - timestamp.length)}${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   Worktree:    ${worktreeId || "N/A"}${worktreeInfo ? " ".repeat(68 - worktreeInfo.length - 3) : " ".repeat(65)}${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   Loop:        ${loopId || "N/A"}${loopInfo ? " ".repeat(68 - loopInfo.length - 3) : " ".repeat(65)}${BOX_CHARS.vertical}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight}
-`);
-
-    // Add to tracked processes
-    this.claudeProcesses.push({
-      pid,
-      worktreeId,
-      loopId,
-      startTime: new Date(),
-      command: "claude",
-    });
+    this.originalConsoleLog(`[NodeAgent] ${parts.join(" ")}`);
   }
 
   /**
@@ -184,59 +139,28 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
   logProcessStop(pid: number): void {
     this.knownPids.delete(pid);
     this.claudeProcesses = this.claudeProcesses.filter((p) => p.pid !== pid);
-
-    console.log(`
-${BOX_CHARS.topLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.topRight}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   🛑 Claude Code Process Stopped                               ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   PID:         ${pid}${" ".repeat(68 - pid.toString().length)}${BOX_CHARS.vertical}
-${BOX_CHARS.vertical}   Timestamp:   ${new Date().toISOString()}                                ${BOX_CHARS.vertical}
-${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}
-${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight}
-`);
+    this.originalConsoleLog(`[NodeAgent] Claude Code process stopped: PID ${pid}`);
   }
 
   /**
-   * Log full Ralph loop state
+   * Log Ralph loop state
    */
   private async logRalphLoopState(): Promise<void> {
     if (this.ralphLoops.length === 0) {
-      console.log(`${BOX_CHARS.vertical}   📭 No active Ralph loops                                      ${BOX_CHARS.vertical}`);
       return;
     }
 
-    console.log(`${BOX_CHARS.vertical}`);
-    console.log(`${BOX_CHARS.vertical}   🔄 Ralph Loop State (${this.ralphLoops.length} active)`);
-    console.log(`${BOX_CHARS.vertical}`);
-
     for (const loop of this.ralphLoops) {
-      const statusEmoji = this.getStatusEmoji(loop.status);
-      const completionPercent =
-        loop.total_subtasks && loop.total_subtasks > 0
-          ? Math.round(((loop.completed_subtasks || 0) / loop.total_subtasks) * 100)
-          : 0;
+      const parts = [
+        `Ralph loop ${loop.id}`,
+        loop.status,
+        `iter:${loop.iteration}`,
+      ];
+      if (loop.phase) parts.push(`phase:${loop.phase}`);
+      if (loop.process_id) parts.push(`PID:${loop.process_id}`);
+      if (loop.git_info?.branch) parts.push(`branch:${loop.git_info.branch}`);
 
-      const progressBar = this.createProgressBar(completionPercent);
-      const gitInfo = loop.git_info
-        ? `${loop.git_info.remote || "?"}/${loop.git_info.branch || "?"}`
-        : "no-git";
-
-      console.log(`${BOX_CHARS.vertical}   ┌─────────────────────────────────────────────────────────`);
-      console.log(
-        `${BOX_CHARS.vertical}   │ ${statusEmoji} ${loop.id} ${loop.status.padEnd(10)} ${progressBar} ${completionPercent}%`
-      );
-      console.log(`${BOX_CHARS.vertical}   │    Phase: ${loop.phase || "unknown"}`);
-      console.log(`${BOX_CHARS.vertical}   │    Task:  ${this.truncate(loop.current_task || "No task", 58)}`);
-      console.log(
-        `${BOX_CHARS.vertical}   │    Subtasks: ${loop.completed_subtasks || 0}/${loop.total_subtasks || 0} complete`
-      );
-      console.log(`${BOX_CHARS.vertical}   │    Git:    ${gitInfo}`);
-      console.log(`${BOX_CHARS.vertical}   │    Path:   ${loop.project_path || "unknown"}`);
-      if (loop.process_id) {
-        console.log(`${BOX_CHARS.vertical}   │    PID:    ${loop.process_id}`);
-      }
-      console.log(`${BOX_CHARS.vertical}   └─────────────────────────────────────────────────────────`);
+      this.originalConsoleLog(`[NodeAgent] ${parts.join(" ")}`);
     }
   }
 
@@ -245,55 +169,20 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
    */
   private async logActivePids(): Promise<void> {
     try {
-      // Get all Claude Code processes
       const { stdout } = await execAsync(
-        'ps aux | grep -E "[c]laude|[d]oppler.*claude" | awk \'{print $2, $11, $12, $13, $14, $15}\''
+        'ps aux | grep -E "[c]laude|[d]oppler.*claude" | awk \'{print $2}\''
       );
       const lines = stdout.trim().split("\n").filter((l) => l.length > 0);
 
-      if (lines.length === 0) {
-        console.log(`${BOX_CHARS.vertical}   🤖 No active Claude Code processes                             ${BOX_CHARS.vertical}`);
-
-        // Check for stopped processes
-        const activePids = new Set<number>();
-        for (const line of lines) {
-          const parts = line.trim().split(/\s+/);
-          const pid = parseInt(parts[0], 10);
+      const activePids = new Set<number>();
+      for (const line of lines) {
+        const pid = parseInt(line.trim(), 10);
+        if (!isNaN(pid)) {
           activePids.add(pid);
-        }
-
-        // Log stopped PIDs
-        for (const knownPid of this.knownPids) {
-          if (!activePids.has(knownPid)) {
-            this.logProcessStop(knownPid);
+          if (!this.knownPids.has(pid)) {
+            this.logProcessStart(pid);
           }
         }
-
-        return;
-      }
-
-      // Track active PIDs from this scan
-      const activePids = new Set<number>();
-
-      console.log(`${BOX_CHARS.vertical}`);
-      console.log(`${BOX_CHARS.vertical}   🤖 Active Claude Code Processes (${lines.length} running)`);
-      console.log(`${BOX_CHARS.vertical}`);
-
-      for (const line of lines) {
-        const parts = line.trim().split(/\s+/);
-        const pid = parseInt(parts[0], 10);
-        const command = parts.slice(1).join(" ");
-
-        // Track this PID as active
-        activePids.add(pid);
-
-        // Check if this is a new PID
-        if (!this.knownPids.has(pid)) {
-          this.logProcessStart(pid);
-        }
-
-        const cmdDisplay = this.truncate(command, 60);
-        console.log(`${BOX_CHARS.vertical}   • PID ${pid.toString().padEnd(8)} ${cmdDisplay}`);
       }
 
       // Check for stopped PIDs
@@ -302,13 +191,17 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
           this.logProcessStop(knownPid);
         }
       }
-    } catch (error) {
-      console.log(`${BOX_CHARS.vertical}   ⚠️  Error detecting Claude processes: ${(error as Error).message}  ${BOX_CHARS.vertical}`);
+
+      if (lines.length > 0) {
+        this.originalConsoleLog(`[NodeAgent] Active Claude Code processes: ${lines.length}`);
+      }
+    } catch {
+      // Error detecting processes, skip
     }
   }
 
   /**
-   * Detect and log active MCP servers and plugins
+   * Detect and log active plugins
    */
   private async logActivePlugins(): Promise<void> {
     const plugins: PluginStatus[] = [];
@@ -318,7 +211,6 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
       const mcpConfigPaths = [
         path.join(process.env.HOME || "", ".mcp.json"),
         path.join(process.env.HOME || "", "seed", ".mcp.json"),
-        path.join(process.env.HOME || "", "Desktop", "codespaces", ".mcp.json"),
       ];
 
       for (const mcpPath of mcpConfigPaths) {
@@ -328,12 +220,12 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
 
           if (config.mcpServers) {
             for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
-              const config = serverConfig as { type?: string; command?: string; args?: string[] };
+              const sc = serverConfig as { type?: string };
               plugins.push({
                 name,
                 type: "mcp",
                 status: "active",
-                details: config.type || "stdio",
+                details: sc.type || "stdio",
               });
             }
           }
@@ -341,11 +233,11 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
           // File doesn't exist or invalid JSON, skip
         }
       }
-    } catch (error) {
+    } catch {
       // Error scanning MCP configs, skip
     }
 
-    // Check for Claude plugins in .claude/plugins
+    // Check for Claude plugins
     try {
       const pluginsDir = path.join(process.env.HOME || "", ".claude", "plugins");
       const entries = await fsp.readdir(pluginsDir, { withFileTypes: true }).catch(() => []);
@@ -360,36 +252,19 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
         }
       }
     } catch {
-      // No plugins directory or error reading
+      // No plugins directory
     }
 
     this.plugins = plugins;
 
-    if (plugins.length === 0) {
-      console.log(`${BOX_CHARS.vertical}   🔌 No active plugins detected                                  ${BOX_CHARS.vertical}`);
-      return;
-    }
+    if (plugins.length > 0) {
+      const byType = plugins.reduce((acc, p) => {
+        acc[p.type] = (acc[p.type] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
 
-    console.log(`${BOX_CHARS.vertical}`);
-    console.log(`${BOX_CHARS.vertical}   🔌 Active Plugins (${plugins.length} total)`);
-    console.log(`${BOX_CHARS.vertical}`);
-
-    // Group by type
-    const byType = plugins.reduce((acc, plugin) => {
-      if (!acc[plugin.type]) {
-        acc[plugin.type] = [];
-      }
-      acc[plugin.type].push(plugin);
-      return acc;
-    }, {} as Record<string, PluginStatus[]>);
-
-    for (const [type, typePlugins] of Object.entries(byType)) {
-      const typeLabel = type === "mcp" ? "MCP Servers" : type === "skill" ? "Skills" : "Hooks";
-      console.log(`${BOX_CHARS.vertical}   ${typeLabel}:`);
-      for (const plugin of typePlugins) {
-        const details = plugin.details ? ` (${plugin.details})` : "";
-        console.log(`${BOX_CHARS.vertical}      • ${plugin.name}${details}`);
-      }
+      const parts = Object.entries(byType).map(([type, count]) => `${count} ${type}`);
+      this.originalConsoleLog(`[NodeAgent] Active plugins: ${parts.join(", ")}`);
     }
   }
 
@@ -397,72 +272,9 @@ ${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight
    * Main status logging function
    */
   private async logStatus(): Promise<void> {
-    const timestamp = new Date().toISOString();
-    const timeStr = timestamp.split("T")[1].split(".")[0];
-
-    console.log(``);
-    console.log(`${BOX_CHARS.topLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.topRight}`);
-    console.log(`${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}`);
-    console.log(
-      `${BOX_CHARS.vertical}   📊 Node Agent Status Update     ${timeStr}                    ${BOX_CHARS.vertical}`
-    );
-    console.log(`${BOX_CHARS.vertical} ${" ".repeat(73)} ${BOX_CHARS.vertical}`);
-    console.log(`${BOX_CHARS.leftT}${BOX_CHARS.horizontal.repeat(73)}${BOX_CHARS.rightT}`);
-
-    // Log Ralph loops
     await this.logRalphLoopState();
-
-    console.log(`${BOX_CHARS.leftT}${BOX_CHARS.horizontal.repeat(73)}${BOX_CHARS.rightT}`);
-
-    // Log active PIDs
     await this.logActivePids();
-
-    console.log(`${BOX_CHARS.leftT}${BOX_CHARS.horizontal.repeat(73)}${BOX_CHARS.rightT}`);
-
-    // Log plugins
     await this.logActivePlugins();
-
-    console.log(`${BOX_CHARS.bottomLeft}${BOX_CHARS.horizontal.repeat(75)}${BOX_CHARS.bottomRight}`);
-    console.log(``);
-  }
-
-  /**
-   * Get status emoji for Ralph loop state
-   */
-  private getStatusEmoji(status: string): string {
-    switch (status) {
-      case "running":
-        return "🟢";
-      case "starting":
-        return "🟡";
-      case "complete":
-        return "✅";
-      case "error":
-        return "❌";
-      case "stopped":
-        return "⏸️ ";
-      default:
-        return "⚪";
-    }
-  }
-
-  /**
-   * Create a progress bar
-   */
-  private createProgressBar(percent: number, width: number = 20): string {
-    const filled = Math.round((percent / 100) * width);
-    const empty = width - filled;
-    return `[${"█".repeat(filled)}${"░".repeat(empty)}]`;
-  }
-
-  /**
-   * Truncate text to fit width
-   */
-  private truncate(text: string, maxWidth: number): string {
-    if (text.length <= maxWidth) {
-      return text.padEnd(maxWidth);
-    }
-    return text.substring(0, maxWidth - 3) + "...";
   }
 
   /**
