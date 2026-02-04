@@ -8,6 +8,30 @@
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir ./dist"
   },
+  "keywords": [
+    "agent",
+    "orchestration",
+    "vps",
+    "node",
+    "ralph",
+    "ai",
+    "infrastructure",
+    "monitoring"
+  ],
+  "author": "Ebowwa Labs <labs@ebowwa.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/ebowwa/codespaces/tree/main/packages/src/seed/node-agent#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ebowwa/codespaces.git",
+    "directory": "packages/src/seed/node-agent"
+  },
+  "bugs": {
+    "url": "https://github.com/ebowwa/codespaces/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "latest"

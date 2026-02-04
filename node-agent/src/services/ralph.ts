@@ -10,7 +10,7 @@ import type {
   RalphIterativeStateFile,
   CreateRalphLoopRequest,
   RalphLoopCommit,
-} from "../types/index";
+} from "@ebowwa/codespaces-types/compile";
 import { GitService } from "./git";
 import { ConsoleLoggerService } from "./console-logger";
 

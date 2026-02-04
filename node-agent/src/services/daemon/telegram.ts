@@ -7,7 +7,7 @@ import type {
   TelegramMessage,
   TelegramSendMessageParams,
   PmCommand,
-} from "../types/index";
+} from "@ebowwa/codespaces-types/compile";
 
 // Configuration
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";

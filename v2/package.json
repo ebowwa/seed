@@ -18,11 +18,32 @@
     "test": "bun test",
     "check": "bun --print 'import(\"./src/index.ts\")'"
   },
+  "keywords": [
+    "setup",
+    "environment",
+    "provisioning",
+    "cli",
+    "automation",
+    "devops",
+    "infrastructure"
+  ],
+  "author": "Ebowwa Labs <labs@ebowwa.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/ebowwa/codespaces/tree/main/packages/src/seed/v2#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ebowwa/codespaces.git",
+    "directory": "packages/src/seed/v2"
+  },
+  "bugs": {
+    "url": "https://github.com/ebowwa/codespaces/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "dependencies": {},
-  "engines": {
-    "bun": ">=1.0.0"
-  }
+  "dependencies": {}
 }

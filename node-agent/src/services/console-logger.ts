@@ -9,7 +9,7 @@ import type {
   PluginStatus,
   RalphLoop,
   ConsoleLogState,
-} from "../types/index";
+} from "@ebowwa/codespaces-types/compile";
 
 const execAsync = promisify(exec);
 
