@@ -571,21 +571,40 @@ install_claude() {
                     if [ "$NODE_VERSION" -lt 18 ]; then
                         print_warning "Node.js version is too old (v$NODE_VERSION). Claude Code requires Node.js 18+"
                         print_info "Installing Node.js 20 LTS..."
-                        
+
                         # Install Node.js 20 LTS from NodeSource repository
-                        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-                        sudo apt-get install -y nodejs
+                        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || {
+                            print_error "Failed to setup Node.js repository"
+                            return 1
+                        }
+                        sudo apt-get install -y nodejs || {
+                            print_error "Failed to install Node.js"
+                            return 1
+                        }
                     fi
                 elif ! command_exists npm; then
                     print_info "Installing Node.js 20 LTS and npm..."
                     # Install Node.js 20 LTS for better compatibility
-                    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-                    sudo apt-get install -y nodejs
+                    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || {
+                        print_error "Failed to setup Node.js repository"
+                        return 1
+                    }
+                    sudo apt-get install -y nodejs || {
+                        print_error "Failed to install Node.js"
+                        return 1
+                    }
                 fi
                 
                 # Install Claude Code globally via npm
                 print_info "Installing Claude Code via npm..."
-                npm install -g @anthropic-ai/claude-code
+                if ! command_exists npm; then
+                    print_error "npm not found. Cannot install Claude Code."
+                    return 1
+                fi
+                npm install -g @anthropic-ai/claude-code || {
+                    print_error "Failed to install Claude Code via npm"
+                    return 1
+                }
                 ;;
             *)
                 print_warning "Claude Code installation not automated for this OS"
@@ -702,7 +721,7 @@ install_github_cli() {
                 ;;
             debian)
                 # Only update gh package, not all system packages
-                sudo apt-get update > /dev/null 2>&1
+                sudo apt-get update > /dev/null 2>&1 || true
                 sudo apt-get install --only-upgrade gh -y 2>/dev/null || true
                 ;;
         esac
@@ -776,16 +795,34 @@ install_doppler() {
                 ;;
             debian)
                 # Install prerequisites
-                sudo apt-get update
-                sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+                sudo apt-get update || {
+                    print_error "Failed to update package lists"
+                    return 1
+                }
+                sudo apt-get install -y apt-transport-https ca-certificates curl gnupg || {
+                    print_error "Failed to install prerequisites"
+                    return 1
+                }
                 
                 # Add Doppler's GPG key and repository (overwrite if exists)
-                curl -sLf --retry 3 --tlsv1.2 --proto "=https" 'https://packages.doppler.com/public/cli/gpg.DE2A7741A397C129.key' | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/doppler-archive-keyring.gpg
-                echo "deb [signed-by=/usr/share/keyrings/doppler-archive-keyring.gpg] https://packages.doppler.com/public/cli/deb/debian any-version main" | sudo tee /etc/apt/sources.list.d/doppler-cli.list
-                
+                curl -sLf --retry 3 --tlsv1.2 --proto "=https" 'https://packages.doppler.com/public/cli/gpg.DE2A7741A397C129.key' | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/doppler-archive-keyring.gpg || {
+                    print_error "Failed to add Doppler GPG key"
+                    return 1
+                }
+                echo "deb [signed-by=/usr/share/keyrings/doppler-archive-keyring.gpg] https://packages.doppler.com/public/cli/deb/debian any-version main" | sudo tee /etc/apt/sources.list.d/doppler-cli.list > /dev/null || {
+                    print_error "Failed to add Doppler repository"
+                    return 1
+                }
+
                 # Install Doppler
-                sudo apt-get update
-                sudo apt-get install -y doppler
+                sudo apt-get update || {
+                    print_error "Failed to update package lists for Doppler"
+                    return 1
+                }
+                sudo apt-get install -y doppler || {
+                    print_error "Failed to install Doppler"
+                    return 1
+                }
                 ;;
             redhat)
                 # Add Doppler's YUM repository
