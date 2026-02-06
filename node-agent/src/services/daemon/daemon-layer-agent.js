@@ -76,6 +76,7 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DaemonLayerAgentService = void 0;
 var child_process_1 = require("child_process");
+var path_1 = require("path");
 var SPAWN_TIMEOUT_MS = 120000; // 2 minutes for spawned sessions
 // ============================================================================
 // PersistentClaudeSession
@@ -108,7 +109,7 @@ var PersistentClaudeSession = /** @class */ (function () {
      */
     PersistentClaudeSession.prototype.start = function () {
         return __awaiter(this, void 0, void 0, function () {
-            var args;
+            var supervisorPath, args;
             var _this = this;
             var _a, _b;
             return __generator(this, function (_c) {
@@ -117,7 +118,8 @@ var PersistentClaudeSession = /** @class */ (function () {
                         if (this.process) {
                             throw new Error("Persistent session already running");
                         }
-                        console.log("[PmBrain] Starting persistent Claude Code session...");
+                        console.log("[PmBrain] Starting persistent Claude Code session with rolling keys supervisor...");
+                        supervisorPath = path_1.default.join(path_1.default.dirname(import.meta.url.replace("file://", "")), "..", "lib", "rolling-keys-supervisor.ts");
                         args = [
                             "run",
                             "--project",
@@ -125,7 +127,9 @@ var PersistentClaudeSession = /** @class */ (function () {
                             "--config",
                             this.config.dopplerConfig,
                             "--",
-                            "claude",
+                            "bun",
+                            "run",
+                            supervisorPath,
                         ];
                         this.process = (0, child_process_1.spawn)("doppler", args, {
                             cwd: this.config.cwd,
@@ -452,6 +456,9 @@ var DaemonLayerAgentService = /** @class */ (function () {
                 // }
                 return [2 /*return*/, new Promise(function (resolve, reject) {
                         var _a, _b;
+                        // Get the path to the rolling-keys-supervisor.ts
+                        var supervisorPath = path_1.default.join(path_1.default.dirname(import.meta.url.replace("file://", "")), "..", "lib", "rolling-keys-supervisor.ts");
+                        // Use rolling keys supervisor for one-shot Claude spawn
                         var args = [
                             "run",
                             "--project",
@@ -459,7 +466,9 @@ var DaemonLayerAgentService = /** @class */ (function () {
                             "--config",
                             _this.config.dopplerConfig,
                             "--",
-                            "claude",
+                            "bun",
+                            "run",
+                            supervisorPath,
                             "-p",
                             prompt,
                         ];

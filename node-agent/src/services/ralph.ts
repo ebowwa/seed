@@ -13,6 +13,8 @@ import type {
 } from "@ebowwa/codespaces-types/compile";
 import { GitService } from "./git";
 import { ConsoleLoggerService } from "./console-logger";
+import path from "path";
+import { fileURLToPath } from "url";
 
 const execAsync = promisify(exec);
 
@@ -423,19 +425,9 @@ export class RalphService {
     };
     await fsp.writeFile(settingsFile, JSON.stringify(settingsContent, null, 2));
 
-    // Start Claude Code process with piped stdio for WebSocket oversight
+    // Start Claude Code process with rolling API keys and auto-retry
     const dopplerProject = process.env.DOPPLER_PROJECT || "seed";
     const dopplerConfig = process.env.DOPPLER_CONFIG || "prd";
-
-    const args = [
-      "run",
-      "--project",
-      dopplerProject,
-      "--config",
-      dopplerConfig,
-      "--",
-      "claude",
-    ];
 
     // Use piped stdio to capture stdout/stdin for WebSocket streaming
     // Note: Don't use detached mode since we need to keep process handles
@@ -443,6 +435,28 @@ export class RalphService {
       cwd: worktree.path,
       stdio: ["pipe", "pipe", "pipe"] as const,
     };
+
+    // Get the path to the rolling-keys-supervisor.ts
+    const supervisorPath = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "lib",
+      "rolling-keys-supervisor.ts"
+    );
+
+    // Spawn with rolling keys supervisor
+    // Use -- to separate doppler args from the claude command
+    const args = [
+      "run",
+      "--project",
+      dopplerProject,
+      "--config",
+      dopplerConfig,
+      "--",
+      "bun",
+      "run",
+      supervisorPath,
+    ];
 
     const child = spawn("doppler", args, options);
 

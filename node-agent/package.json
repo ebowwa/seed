@@ -32,7 +32,9 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@codespaces/rolling-keys": "workspace:*"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   }

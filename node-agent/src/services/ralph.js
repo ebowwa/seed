@@ -44,6 +44,7 @@ var util_1 = require("util");
 var path_1 = require("path");
 var git_1 = require("./git");
 var console_logger_1 = require("./console-logger");
+var url_1 = require("url");
 var execAsync = (0, util_1.promisify)(child_process_1.exec);
 // Configuration
 var NODE_AGENT_DIR = path_1.default.join(process.env.HOME || "", ".node-agent");
@@ -406,7 +407,7 @@ var RalphService = /** @class */ (function () {
      */
     RalphService.prototype.startRalphLoop = function (request) {
         return __awaiter(this, void 0, void 0, function () {
-            var worktrees, worktree, loopId, pidFile, logFile, stateFilePath, pid, _a, machineInfo, now, stateContent, claudeDir, settingsFile, settingsContent, dopplerProject, dopplerConfig, args, options, child, logEntry;
+            var worktrees, worktree, loopId, pidFile, logFile, stateFilePath, pid, _a, machineInfo, now, stateContent, claudeDir, settingsFile, settingsContent, dopplerProject, dopplerConfig, options, supervisorPath, args, child, logEntry;
             var _this = this;
             return __generator(this, function (_b) {
                 switch (_b.label) {
@@ -537,6 +538,11 @@ var RalphService = /** @class */ (function () {
                         _b.sent();
                         dopplerProject = process.env.DOPPLER_PROJECT || "seed";
                         dopplerConfig = process.env.DOPPLER_CONFIG || "prd";
+                        options = {
+                            cwd: worktree.path,
+                            stdio: ["pipe", "pipe", "pipe"],
+                        };
+                        supervisorPath = path_1.default.join(path_1.default.dirname((0, url_1.fileURLToPath)(import.meta.url)), "..", "lib", "rolling-keys-supervisor.ts");
                         args = [
                             "run",
                             "--project",
@@ -544,12 +550,10 @@ var RalphService = /** @class */ (function () {
                             "--config",
                             dopplerConfig,
                             "--",
-                            "claude",
+                            "bun",
+                            "run",
+                            supervisorPath,
                         ];
-                        options = {
-                            cwd: worktree.path,
-                            stdio: ["pipe", "pipe", "pipe"],
-                        };
                         child = (0, child_process_1.spawn)("doppler", args, options);
                         if (!child.pid || !child.stdin || !child.stdout) {
                             throw new Error("PROCESS_START_FAILED");

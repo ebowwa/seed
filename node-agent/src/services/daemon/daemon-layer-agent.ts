@@ -38,6 +38,7 @@
 // ============================================================================
 
 import { spawn } from "child_process";
+import path from "path";
 import type {
   PmBrainResponse,
   MonitorEvent,
@@ -92,8 +93,18 @@ class PersistentClaudeSession {
       throw new Error("Persistent session already running");
     }
 
-    console.log("[PmBrain] Starting persistent Claude Code session...");
+    console.log("[PmBrain] Starting persistent Claude Code session with rolling keys supervisor...");
 
+    // Get the path to the rolling-keys-supervisor.ts
+    const supervisorPath = path.join(
+      path.dirname(import.meta.url.replace("file://", "")),
+      "..",
+      "lib",
+      "rolling-keys-supervisor.ts"
+    );
+
+    // Spawn with rolling keys supervisor
+    // Use -- to separate doppler args from the claude command
     const args = [
       "run",
       "--project",
@@ -101,7 +112,9 @@ class PersistentClaudeSession {
       "--config",
       this.config.dopplerConfig,
       "--",
-      "claude",
+      "bun",
+      "run",
+      supervisorPath,
     ];
 
     this.process = spawn("doppler", args, {
@@ -419,6 +432,15 @@ export class DaemonLayerAgentService {
     // }
 
     return new Promise((resolve, reject) => {
+      // Get the path to the rolling-keys-supervisor.ts
+      const supervisorPath = path.join(
+        path.dirname(import.meta.url.replace("file://", "")),
+        "..",
+        "lib",
+        "rolling-keys-supervisor.ts"
+      );
+
+      // Use rolling keys supervisor for one-shot Claude spawn
       const args = [
         "run",
         "--project",
@@ -426,7 +448,9 @@ export class DaemonLayerAgentService {
         "--config",
         this.config.dopplerConfig,
         "--",
-        "claude",
+        "bun",
+        "run",
+        supervisorPath,
         "-p",
         prompt,
       ];
