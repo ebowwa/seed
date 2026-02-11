@@ -5,7 +5,7 @@
  * with automatic rotation and fallback using RollingKeyManager.
  */
 
-import { RollingKeyManager, createRollingKeyManager } from "@codespaces/rolling-keys";
+import { RollingKeyManager, createRollingKeyManager } from "@ebowwa/rolling-keys";
 
 /**
  * Singleton instance of the RollingKeyManager configured for Anthropic API keys

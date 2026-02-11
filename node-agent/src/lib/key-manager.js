@@ -3,7 +3,7 @@
  * Key Manager - Rolling API Key Integration for Seed
  *
  * Provides centralized API key management with automatic rotation and fallback.
- * Uses @codespaces/rolling-keys for round-robin key rotation with exponential backoff.
+ * Uses @ebowwa/rolling-keys for round-robin key rotation with exponential backoff.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getManager = void 0;
@@ -16,7 +16,7 @@ exports.isApiKeyError = isApiKeyError;
 exports.handleAnthropicApiError = handleAnthropicApiError;
 exports.getAnthropicKeyStats = getAnthropicKeyStats;
 exports.recoverAnthropicKeys = recoverAnthropicKeys;
-var rolling_keys_1 = require("@codespaces/rolling-keys");
+var rolling_keys_1 = require("@ebowwa/rolling-keys");
 /**
  * Singleton instance of the RollingKeyManager configured for Anthropic API keys
  */

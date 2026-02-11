@@ -19,7 +19,7 @@
 //   │  • spawnWorkers() - Parallel workers                      │
 //   └─────────────────────────────────────────────────────────────┘
 //
-// INTEGRATION POINTS for @codespaces/tooling:
+// INTEGRATION POINTS for @ebowwa/tooling:
 //   1. start() - Run tooling.sync() on startup to ensure repos are current
 //   2. processMessage() - Check tooling.status() for context before processing
 //   3. spawnWorker() - Validate tooling state before spawning workers
@@ -31,7 +31,7 @@
 //   - cwd: Working directory for Claude sessions
 //
 // TODO: Add tooling integration
-//   - import { ToolingService } from "@codespaces/tooling"
+//   - import { ToolingService } from "@ebowwa/tooling"
 //   - Call tooling.sync() during start()
 //   - Expose tooling status via API
 //

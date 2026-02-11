@@ -20,7 +20,7 @@ exports.recoverAllKeys = recoverAllKeys;
 exports.isKeyFailureError = isKeyFailureError;
 exports.destroyKeyManager = destroyKeyManager;
 exports.resetKeyManager = resetKeyManager;
-var rolling_keys_1 = require("@codespaces/rolling-keys");
+var rolling_keys_1 = require("@ebowwa/rolling-keys");
 /**
  * Singleton instance of the RollingKeyManager configured for Anthropic API keys
  */
