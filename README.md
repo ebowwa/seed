@@ -85,17 +85,103 @@ doppler run --project seed --config prd -- claude '/quit' -p
 
 📖 **Full Documentation:** [RALPH-ITERATIVE-SETUP.md](./RALPH-ITERATIVE-SETUP.md)
 
-## Configuration
+## Multi-Node Setup
 
-### Environment Variables
+### Node Architecture
+
+```
+Coordinator Node (seed-node-prod)
+├── PM Daemon: Orchestrates work across nodes
+├── Node Agent API: http://100.71.68.25:8911
+└── Tailscale VPN: Connects all nodes
+
+Worker Nodes (seed-node-1, seed-node-2, ...)
+├── Node Agent: Executes assigned tasks
+├── Ralph Iterative: Runs autonomous loops
+└── Tailscale VPN: Private mesh network
+```
+
+### Quick Setup for New Nodes
 
 ```bash
-# .env file
-AI_ASSISTANT=zai
-ZAI_API_KEY=your-key
-GITHUB_TOKEN=ghp_xxx
-DOPPLER_TOKEN=dp.st.xxx
-TAILSCALE_AUTH_KEY=tskey-xxx
+# 1. Bootstrap script (coming soon)
+curl -fsSL https://raw.githubusercontent.com/ebowwa/seed/main/bootstrap-node.sh | bash
+
+# 2. Manual setup
+git clone https://github.com/ebowwa/seed.git
+cd seed
+./setup.sh
+
+# 3. Connect to VPN
+tailscale up
+
+# 4. Register with coordinator
+curl -X POST http://100.71.68.25:8911/api/nodes/register \
+  -H "Content-Type: application/json" \
+  -d '{"node_name": "seed-node-1", "role": "worker"}'
+```
+
+### Node Management
+
+```bash
+# Check node health
+curl http://100.71.68.25:8911/api/health
+
+# List all nodes
+curl http://100.71.68.25:8911/api/nodes
+
+# Submit work to node
+curl -X POST http://100.71.68.25:8911/api/ralph/start \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Fix the authentication bug", "target_node": "seed-node-1"}'
+```
+
+📖 **Full Documentation:** [NODE-SETUP-GUIDE.md](./NODE-SETUP-GUIDE.md)
+
+## Configuration
+
+### Secrets Management (Doppler)
+
+All secrets are managed via [Doppler](https://doppler.com) - no hardcoded tokens in `.env` files.
+
+```bash
+# Install and login
+brew install doppler-cli  # macOS
+# or
+curl -sL https://cli.doppler.com/install.sh | sh  # Linux
+doppler login
+
+# Setup project
+doppler setup  # Creates seed project with dev/prd configs
+
+# Run any command with secrets injected
+doppler run --project seed --config prd -- <your-command>
+
+# View secrets
+doppler secrets download --no-mask --project seed --config prd
+```
+
+**Required Secrets in Doppler:**
+
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AI_ASSISTANT` | Claude provider | `zai` |
+| `ZAI_API_KEY` | Z.ai API key | `zai_xxx` |
+| `GITHUB_TOKEN` | GitHub Personal Access Token | `ghp_xxx` |
+| `DOPPLER_TOKEN` | Doppler service token | `dp.st.xxx` |
+| `TAILSCALE_AUTH_KEY` | Tailscale auth key | `tskey-xxx` |
+
+### Git Credential Helper
+
+Git is configured to fetch tokens from Doppler automatically:
+
+```bash
+# Credential helper is installed by setup.sh
+# Uses Doppler GITHUB_TOKEN for all GitHub operations
+git config --global credential.helper /root/.git-credentials-doppler
+
+# No need to set credentials manually
+git clone https://github.com/ebowwa/seed.git  # Just works
 ```
 
 ## Environments
@@ -107,6 +193,21 @@ TAILSCALE_AUTH_KEY=tskey-xxx
 | **Local Dev** | All tools |
 
 ## Post-Installation
+
+### Doppler Setup
+
+```bash
+# Login to Doppler (one-time)
+doppler login
+
+# Configure project (already set up for seed)
+doppler setup --project seed --config prd
+
+# Verify secrets are accessible
+doppler run --project seed --config prd -- env | grep -E "(ZAI|GITHUB|DOPPLER|TAILSCALE)"
+```
+
+### GitHub Credentials
 
 ```bash
 # GitHub CLI
