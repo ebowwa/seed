@@ -247,6 +247,316 @@ async function handleRequest(req: Request): Promise<Response> {
     if (errorMessage.includes("WORKTREE_NOT_FOUND")) {
       return errorResponse("WORKTREE_NOT_FOUND", "Worktree not found");
     }
+    // ========================================================================
+    // Claude Code Bridge & Distributed Queue API
+    // ========================================================================
+
+    // GET /api/capabilities - List seed's capabilities
+    if (url.pathname === "/api/capabilities" && method === "GET") {
+      const capabilities = {
+        localCapabilities: [
+          "autonomous-loops",
+          "persistent-memory",
+          "ralph-execution",
+          "git-hygiene",
+          "system-monitoring",
+          "distributed-queue"
+        ],
+        delegatableCapabilities: {
+          github: {
+            description: "GitHub operations (repos, PRs, issues)",
+            requires: "Claude Code with GitHub MCP"
+          },
+          hetzner: {
+            description: "Hetzner cloud provisioning",
+            requires: "Claude Code with Hetzner MCP"
+          },
+          tailscale: {
+            description: "Tailscale network management",
+            requires: "Claude Code with Tailscale MCP"
+          },
+          nmap: {
+            description: "Network scanning",
+            requires: "Claude Code with Nmap MCP"
+          },
+          npm: {
+            description: "npm package management",
+            requires: "Claude Code with npm MCP"
+          },
+          telegram: {
+            description: "Telegram notifications",
+            requires: "Claude Code with Telegram MCP"
+          }
+        }
+      };
+      return jsonResponse(capabilities, { headers });
+    }
+
+    // GET /api/queue - Get distributed queue status
+    if (url.pathname === "/api/queue" && method === "GET") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const queueFile = path.join(process.cwd(), "../../state/distributed-queue.json");
+
+      try {
+        if (fs.existsSync(queueFile)) {
+          const data = fs.readFileSync(queueFile, "utf-8");
+          const queue = JSON.parse(data);
+          return jsonResponse(queue, { headers });
+        }
+
+        return jsonResponse(
+          {
+            pending: [],
+            inProgress: [],
+            completed: [],
+            failed: [],
+            stats: { totalTasks: 0, completedTasks: 0, failedTasks: 0 }
+          },
+          { headers }
+        );
+      } catch (error) {
+        return errorResponse("QUEUE_READ_ERROR", "Failed to read queue");
+      }
+    }
+
+    // POST /api/queue - Add a task to the queue
+    if (url.pathname === "/api/queue" && method === "POST") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const queueFile = path.join(process.cwd(), "../../state/distributed-queue.json");
+      const stateDir = path.dirname(queueFile);
+
+      try {
+        const body = (await req.json()) as Record<string, unknown>;
+
+        // Ensure state directory exists
+        if (!fs.existsSync(stateDir)) {
+          fs.mkdirSync(stateDir, { recursive: true });
+        }
+
+        // Load existing queue
+        let queue = { pending: [], inProgress: [], completed: [], failed: [], stats: {} };
+        if (fs.existsSync(queueFile)) {
+          const data = fs.readFileSync(queueFile, "utf-8");
+          queue = JSON.parse(data);
+        }
+
+        // Create new task
+        const newTask = {
+          id: Date.now(),
+          task: body.task || body,
+          priority: (body.priority as string) || "normal",
+          requiredCapability: (body.requiredCapability as string) || null,
+          assignedTo: null,
+          status: "pending",
+          createdAt: new Date().toISOString()
+        };
+
+        // Insert based on priority
+        if (newTask.priority === "critical") {
+          queue.pending.unshift(newTask);
+        } else {
+          queue.pending.push(newTask);
+        }
+
+        // Update stats
+        queue.stats = {
+          totalTasks: queue.pending.length + queue.inProgress.length + queue.completed.length + queue.failed.length,
+          completedTasks: queue.completed.length,
+          failedTasks: queue.failed.length
+        };
+
+        // Save queue
+        fs.writeFileSync(queueFile, JSON.stringify(queue, null, 2));
+
+        return jsonResponse({ success: true, taskId: newTask.id, task: newTask }, { headers });
+      } catch (error) {
+        return errorResponse("QUEUE_WRITE_ERROR", "Failed to add task to queue");
+      }
+    }
+
+    // GET /api/queue/next - Claim next pending task
+    if (url.pathname === "/api/queue/next" && method === "GET") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const queueFile = path.join(process.cwd(), "../../state/distributed-queue.json");
+      const nodeId = url.searchParams.get("nodeId") || "unknown";
+
+      try {
+        if (!fs.existsSync(queueFile)) {
+          return errorResponse("QUEUE_NOT_FOUND", "No queue found");
+        }
+
+        const data = fs.readFileSync(queueFile, "utf-8");
+        const queue = JSON.parse(data);
+
+        if (queue.pending.length === 0) {
+          return jsonResponse({ success: false, message: "No pending tasks" }, { headers });
+        }
+
+        // Get first task
+        const [task] = queue.pending.splice(0, 1);
+        task.assignedTo = nodeId;
+        task.status = "in-progress";
+        task.claimedAt = new Date().toISOString();
+        queue.inProgress.push(task);
+
+        // Update stats
+        queue.stats = {
+          totalTasks: queue.pending.length + queue.inProgress.length + queue.completed.length + queue.failed.length,
+          completedTasks: queue.completed.length,
+          failedTasks: queue.failed.length
+        };
+
+        fs.writeFileSync(queueFile, JSON.stringify(queue, null, 2));
+
+        return jsonResponse({ success: true, task }, { headers });
+      } catch (error) {
+        return errorResponse("QUEUE_ERROR", "Failed to claim task");
+      }
+    }
+
+    // POST /api/queue/:taskId/complete - Complete a task
+    if (url.pathname.startsWith("/api/queue/") && url.pathname.endsWith("/complete") && method === "POST") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const queueFile = path.join(process.cwd(), "../../state/distributed-queue.json");
+      const taskId = parseInt(url.pathname.split("/")[3]);
+
+      try {
+        if (!fs.existsSync(queueFile)) {
+          return errorResponse("QUEUE_NOT_FOUND", "No queue found");
+        }
+
+        const data = fs.readFileSync(queueFile, "utf-8");
+        const queue = JSON.parse(data);
+
+        const taskIndex = queue.inProgress.findIndex((t: { id: number }) => t.id === taskId);
+        if (taskIndex === -1) {
+          return errorResponse("TASK_NOT_FOUND", "Task not found in progress");
+        }
+
+        const body = (await req.json()) as { result?: unknown };
+        const [task] = queue.inProgress.splice(taskIndex, 1);
+        task.status = "completed";
+        task.result = body.result || null;
+        task.completedAt = new Date().toISOString();
+        task.duration = new Date(task.completedAt).getTime() - new Date(task.claimedAt).getTime();
+        queue.completed.push(task);
+
+        // Update stats
+        queue.stats = {
+          totalTasks: queue.pending.length + queue.inProgress.length + queue.completed.length + queue.failed.length,
+          completedTasks: queue.completed.length,
+          failedTasks: queue.failed.length
+        };
+
+        fs.writeFileSync(queueFile, JSON.stringify(queue, null, 2));
+
+        return jsonResponse({ success: true, task, stats: queue.stats }, { headers });
+      } catch (error) {
+        return errorResponse("QUEUE_ERROR", "Failed to complete task");
+      }
+    }
+
+    // POST /api/seed/register - Register a Claude Code instance
+    if (url.pathname === "/api/seed/register" && method === "POST") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const bridgeFile = path.join(process.cwd(), "../../state/claude-code-bridge.json");
+      const stateDir = path.dirname(bridgeFile);
+
+      try {
+        // Ensure state directory exists
+        if (!fs.existsSync(stateDir)) {
+          fs.mkdirSync(stateDir, { recursive: true });
+        }
+
+        const body = (await req.json()) as Record<string, unknown>;
+
+        // Load existing bridge state
+        let bridge = { registeredNodes: [], sentMessages: [], receivedMessages: [] };
+        if (fs.existsSync(bridgeFile)) {
+          const data = fs.readFileSync(bridgeFile, "utf-8");
+          bridge = JSON.parse(data);
+        }
+
+        // Register node
+        const existingNode = bridge.registeredNodes.find(
+          (n: { nodeId?: string }) => n.nodeId === body.nodeId
+        );
+        if (existingNode) {
+          existingNode.lastSeen = new Date().toISOString();
+        } else {
+          bridge.registeredNodes.push({
+            ...body,
+            registeredAt: new Date().toISOString(),
+            lastSeen: new Date().toISOString()
+          });
+        }
+
+        fs.writeFileSync(bridgeFile, JSON.stringify(bridge, null, 2));
+
+        return jsonResponse({ success: true, message: "Registered successfully" }, { headers });
+      } catch (error) {
+        return errorResponse("REGISTER_ERROR", "Failed to register node");
+      }
+    }
+
+    // POST /api/seed/message - Receive a message from Claude Code
+    if (url.pathname === "/api/seed/message" && method === "POST") {
+      const fs = await import("fs");
+      const path = await import("path");
+      const bridgeFile = path.join(process.cwd(), "../../state/claude-code-bridge.json");
+      const stateDir = path.dirname(bridgeFile);
+
+      try {
+        // Ensure state directory exists
+        if (!fs.existsSync(stateDir)) {
+          fs.mkdirSync(stateDir, { recursive: true });
+        }
+
+        const body = (await req.json()) as Record<string, unknown>;
+
+        // Load existing bridge state
+        let bridge = { registeredNodes: [], sentMessages: [], receivedMessages: [] };
+        if (fs.existsSync(bridgeFile)) {
+          const data = fs.readFileSync(bridgeFile, "utf-8");
+          bridge = JSON.parse(data);
+        }
+
+        // Store message
+        bridge.receivedMessages.push({
+          ...body,
+          receivedAt: new Date().toISOString()
+        });
+
+        fs.writeFileSync(bridgeFile, JSON.stringify(bridge, null, 2));
+
+        return jsonResponse({ success: true, message: "Message received" }, { headers });
+      } catch (error) {
+        return errorResponse("MESSAGE_ERROR", "Failed to store message");
+      }
+    }
+
+    // POST /api/seed/delegate - Delegate a task to Claude Code (for MCP tools)
+    if (url.pathname === "/api/seed/delegate" && method === "POST") {
+      const body = (await req.json()) as Record<string, unknown>;
+      return jsonResponse(
+        {
+          success: true,
+          message: "Task delegation received",
+          taskId: body.id,
+          task: body.task
+        },
+        { headers }
+      );
+    }
+
+    // ========================================================================
+    // Error Handling
+    // ========================================================================
     if (errorMessage.includes("WORKTREE_ALREADY_EXISTS")) {
       return errorResponse("WORKTREE_ALREADY_EXISTS", "Worktree already exists");
     }

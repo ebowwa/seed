@@ -22,6 +22,7 @@ logs/
 *.tmp
 temp/
 tmp/
+state/
 
 # Backup files
 *.bak
