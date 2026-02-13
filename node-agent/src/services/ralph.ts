@@ -1,4 +1,4 @@
-// Ralph Loop Management Service
+// Ralph Loop Management Service (Branch-based, single active loop)
 
 import { promises as fsp } from "fs";
 import { exec, spawn } from "child_process";
@@ -22,11 +22,12 @@ const execAsync = promisify(exec);
 const NODE_AGENT_DIR = path.join(process.env.HOME || "", ".node-agent");
 const PIDS_DIR = path.join(NODE_AGENT_DIR, "pids");
 const LOGS_DIR = path.join(NODE_AGENT_DIR, "logs");
+const REPO_PATH = path.join(process.env.HOME || "", "repos", "main-repo");
 
 // Directories to scan for Ralph Iterative state files
 const RALPH_SCAN_DIRS = [
   path.join(process.env.HOME || "", "seed"), // Main seed directory
-  path.join(process.env.HOME || "", "seed", "worktrees"), // Worktrees
+  path.join(process.env.HOME || "", "repos", "main-repo"), // Main repo
 ];
 
 export class RalphService {
@@ -34,6 +35,7 @@ export class RalphService {
   private consoleLogger: ConsoleLoggerService;
   private pids: Map<string, number> = new Map();
   private activeProcesses: Map<string, { process: ReturnType<typeof spawn>, stdout: Readable, stdin: Writable }> = new Map();
+  private activeLoopLock: string | null = null; // Only ONE Ralph loop at a time!
 
   constructor() {
     this.gitService = new GitService();
@@ -45,6 +47,20 @@ export class RalphService {
     await fsp.mkdir(NODE_AGENT_DIR, { recursive: true });
     await fsp.mkdir(PIDS_DIR, { recursive: true });
     await fsp.mkdir(LOGS_DIR, { recursive: true });
+  }
+
+  /**
+   * Check if another Ralph loop is currently running
+   */
+  isLoopActive(): boolean {
+    return this.activeLoopLock !== null;
+  }
+
+  /**
+   * Get the active loop ID
+   */
+  getActiveLoop(): string | null {
+    return this.activeLoopLock;
   }
 
   /**
@@ -106,224 +122,82 @@ export class RalphService {
         const completedSubtasks = state.slam?.completedSubtasks?.length || 0;
 
         // Find current subtask
-        const currentSubtaskId = state.slam?.currentSubtask;
-        const currentSubtask = subtasks.find((st) => st.id === currentSubtaskId);
+        const currentSubtask = subtasks.find(s => !state.slam?.completedSubtasks?.includes(s.id));
 
-        // Get project directory (parent of .claude folder)
-        const projectDir = path.dirname(path.dirname(filePath));
-        const homeDir = process.env.HOME || "";
-        // Format as relative path: ~/seed or ~/seed/worktrees/feature-x
-        let projectPath = projectDir;
-        if (projectDir.startsWith(homeDir)) {
-          projectPath = "~" + projectDir.slice(homeDir.length);
-        }
-
-        // Get git info (remote and branch)
-        const gitInfo = await this.getGitInfo(projectDir);
-
-        // Get PID if process is running
-        const processId = this.pids.get(id);
+        // Get current branch name
+        const branchName = state.git?.branchName || "unknown";
 
         loops.push({
           id,
-          worktree_id: projectName,
+          worktree_id: projectName, // Renamed from worktree_id but keeping API compat
+          branch_name: branchName,
           status,
+          created_at: state.startTime || new Date().toISOString(),
+          updated_at: state.lastUpdate || new Date().toISOString(),
           prompt: state.prompt,
+          completion_promise: state.promise,
           iteration: state.iteration,
-          max_iterations: 0, // Ralph Iterative doesn't use max_iterations
-          completion_promise: state.promise || null,
-          started_at: state.startTime,
-          last_activity: state.lastUpdate,
-          process_id,
-          project_path: projectPath,
-          git_info: gitInfo,
-          // Ralph Iterative specific fields
-          phase: state.slam?.phase,
-          current_task: currentSubtask?.title || state.slam?.state?.currentTask,
           total_subtasks: totalSubtasks,
           completed_subtasks: completedSubtasks,
-          subtasks: subtasks.map((st) => ({
-            id: st.id,
-            title: st.title,
-            status: st.status,
-          })),
+          current_subtask: currentSubtask?.title || currentSubtask?.description || "None",
+          slam_phase: state.slam?.phase || "planning",
+          tokens: state.tokens,
+          files_changed: state.filesChanged,
+          machine: state.machine,
         });
-      } catch {
-        // Invalid JSON or other error, skip
-        continue;
+      } catch (error) {
+        console.error(`Failed to parse state file ${filePath}:`, error);
       }
     }
 
-    // Also scan for legacy markdown state files in worktrees
-    const worktrees = await this.gitService.listWorktrees();
-
-    for (const worktree of worktrees) {
-      const stateFile = path.join(worktree.path, ".claude", "ralph-loop.local.md");
-
-      try {
-        // Check if state file exists
-        const content = await fsp.readFile(stateFile, "utf-8");
-        const state = this.parseStateFile(content);
-
-        // Check if process is running
-        const pidFile = path.join(PIDS_DIR, `${worktree.id}.pid`);
-        let processId: number | undefined;
-        let status: "running" | "complete" | "stopped" = "stopped";
-
-        if (await this.fileExists(pidFile)) {
-          const pid = parseInt(await fsp.readFile(pidFile, "utf-8"), 10);
-          if (await this.isProcessRunning(pid)) {
-            processId = pid;
-            status = "running";
-          } else {
-            // Process ended but state file exists = complete
-            status = "complete";
-            // Clean up stale PID file
-            await fsp.unlink(pidFile);
-          }
-        } else if (state.active) {
-          // State file says active but no PID file = orphaned
-          status = "stopped";
-        }
-
-        // Skip complete and stopped loops - only return actively running loops
-        if (status === "stopped") {
-          continue;
-        }
-
-        // For complete loops, only include if they just finished recently (last 5 minutes)
-        if (status === "complete") {
-          const now = Date.now();
-          const completedAt = new Date(state.started_at).getTime();
-          const hoursSinceComplete = (now - completedAt) / (1000 * 60 * 60);
-          if (hoursSinceComplete > 0.1) { // 6 minutes
-            continue; // Skip old completed loops
-          }
-        }
-
-        // Get recent commits
-        const recentCommits = await this.gitService.getRecentCommits(worktree.path, 5);
-
-        loops.push({
-          id: worktree.id,
-          worktree_id: worktree.id,
-          status,
-          prompt: state.prompt,
-          iteration: state.iteration,
-          max_iterations: state.max_iterations,
-          completion_promise: state.completion_promise,
-          started_at: state.started_at,
-          process_id,
-          recent_commits: recentCommits,
-        });
-      } catch {
-        // No state file, skip
-        continue;
-      }
-    }
+    // Sort by creation date (newest first)
+    loops.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     return loops;
   }
 
   /**
-   * Find all Ralph Iterative state files (.claude/.ralph-iterative.*.json)
-   * by scanning configured directories recursively
-   */
-  private async findRalphIterativeStateFiles(): Promise<
-    Array<{ filePath: string; projectName: string }>
-  > {
-    const results: Array<{ filePath: string; projectName: string }> = [];
-
-    for (const scanDir of RALPH_SCAN_DIRS) {
-      try {
-        await this.scanDirectoryForRalphFiles(scanDir, results);
-      } catch {
-        // Directory doesn't exist or isn't accessible, skip
-        continue;
-      }
-    }
-
-    return results;
-  }
-
-  /**
-   * Recursively scan a directory for .claude/.ralph-iterative.*.json files
-   */
-  private async scanDirectoryForRalphFiles(
-    dirPath: string,
-    results: Array<{ filePath: string; projectName: string }>,
-  ): Promise<void> {
-    try {
-      const entries = await fsp.readdir(dirPath, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
-
-        if (entry.isDirectory()) {
-          // Skip node_modules and hidden dirs (except .claude)
-          if (entry.name === "node_modules" || (entry.name.startsWith(".") && entry.name !== ".claude")) {
-            continue;
-          }
-          // Recursively scan subdirectories
-          await this.scanDirectoryForRalphFiles(fullPath, results);
-        } else if (entry.name.startsWith(".ralph-iterative.") && entry.name.endsWith(".json")) {
-          // Found a Ralph Iterative state file!
-          // Determine project name from parent directory or path
-          const parentDir = path.basename(dirPath);
-          const projectName = parentDir === ".claude" ? path.basename(path.dirname(dirPath)) : parentDir;
-
-          results.push({
-            filePath: fullPath,
-            projectName,
-          });
-        }
-      }
-    } catch {
-      // Directory not accessible, skip
-    }
-  }
-
-  /**
-   * Get a specific Ralph loop by ID
-   */
-  async getRalphLoop(loopId: string): Promise<RalphLoop | null> {
-    const loops = await this.listRalphLoops();
-    return loops.find((loop) => loop.id === loopId) || null;
-  }
-
-  /**
-   * Start a new Ralph loop using Ralph Iterative format
-   *
-   * Creates .claude/.ralph-iterative.local.json with SLAM state
-   * and spawns Claude Code which will detect the file and start iterating.
+   * Start a new Ralph loop (creates branch, spawns process)
+   * NOTE: Only ONE loop can run at a time!
    */
   async startRalphLoop(request: CreateRalphLoopRequest): Promise<RalphLoop> {
-    const worktrees = await this.gitService.listWorktrees();
-    const worktree = worktrees.find((w) => w.id === request.worktree_id);
-
-    if (!worktree) {
-      throw new Error("WORKTREE_NOT_FOUND");
+    // Check if another loop is already running
+    if (this.activeLoopLock !== null) {
+      throw new Error("RALPH_LOOP_ALREADY_RUNNING: Only one Ralph loop at a time. Use DELETE /api/ralph-loops/:id to stop the active loop first.");
     }
 
-    const loopId = worktree.id;
+    // Generate loop ID
+    const loopId = request.worktree_id || `ralph-${Date.now()}`;
+    const branchName = `feature/ralph-${loopId}`;
+    const baseBranch = request.base_branch || "main";
+
+    // Create branch
+    const createResult = await this.gitService.createBranch({
+      id: loopId,
+      branch: baseBranch,
+      repository_url: request.repository_url,
+    });
+
+    // Acquire lock
+    this.activeLoopLock = loopId;
+
+    // Setup paths
     const pidFile = path.join(PIDS_DIR, `${loopId}.pid`);
     const logFile = path.join(LOGS_DIR, `${loopId}.log`);
-    const stateFilePath = path.join(
-      worktree.path,
-      ".claude",
-      ".ralph-iterative.local.json",
-    );
+    const stateFilePath = path.join(REPO_PATH, ".claude", ".ralph-iterative.local.json");
 
     // Check if already running
     if (await this.fileExists(pidFile)) {
       const pid = parseInt(await fsp.readFile(pidFile, "utf-8"), 10);
       if (await this.isProcessRunning(pid)) {
+        this.activeLoopLock = null; // Release lock
         throw new Error("RALPH_LOOP_ALREADY_RUNNING");
       }
     }
 
     // Check if state file already exists (Ralph Iterative session already active)
     if (await this.fileExists(stateFilePath)) {
+      this.activeLoopLock = null; // Release lock
       throw new Error("RALPH_ITERATIVE_ALREADY_ACTIVE");
     }
 
@@ -353,14 +227,14 @@ export class RalphService {
         enabled: request.auto_commit || request.auto_pr || false,
         autoCommit: request.auto_commit || request.auto_pr || false,
         autoPR: request.auto_pr || false,
-        baseBranch: request.base_branch || "main",
+        baseBranch: baseBranch,
+        branchName: branchName, // NEW: Track branch name
         useLane: false,
-        useWorktree: true,
+        useWorktree: false, // NEW: Changed to false
         laneName: "",
         lanePath: "",
         laneCreated: false,
-        branchCreated: false,
-        branchName: "",
+        branchCreated: true, // NEW: Always true
         currentCommit: "",
       },
       slam: {
@@ -398,7 +272,7 @@ export class RalphService {
     };
 
     // Ensure .claude directory exists
-    const claudeDir = path.join(worktree.path, ".claude");
+    const claudeDir = path.join(REPO_PATH, ".claude");
     await fsp.mkdir(claudeDir, { recursive: true });
 
     // Write Ralph Iterative state file
@@ -408,7 +282,7 @@ export class RalphService {
     );
 
     // Create .claude/settings.local.json with Ralph Iterative permissions
-    const settingsFile = path.join(worktree.path, ".claude", "settings.local.json");
+    const settingsFile = path.join(REPO_PATH, ".claude", "settings.local.json");
     const settingsContent = {
       permissions: {
         allow: [
@@ -430,9 +304,8 @@ export class RalphService {
     const dopplerConfig = process.env.DOPPLER_CONFIG || "prd";
 
     // Use piped stdio to capture stdout/stdin for WebSocket streaming
-    // Note: Don't use detached mode since we need to keep process handles
     const options = {
-      cwd: worktree.path,
+      cwd: REPO_PATH, // Changed: Work in main repo path
       stdio: ["pipe", "pipe", "pipe"] as const,
     };
 
@@ -444,8 +317,10 @@ export class RalphService {
       "rolling-keys-supervisor.ts"
     );
 
+    // Use absolute path to bun to avoid PATH issues when spawned by doppler
+    const bunPath = path.join(process.env.HOME || "", ".bun", "bin", "bun");
+
     // Spawn with rolling keys supervisor
-    // Use -- to separate doppler args from the claude command
     const args = [
       "run",
       "--project",
@@ -453,7 +328,7 @@ export class RalphService {
       "--config",
       dopplerConfig,
       "--",
-      "bun",
+      bunPath,
       "run",
       supervisorPath,
     ];
@@ -461,6 +336,7 @@ export class RalphService {
     const child = spawn("doppler", args, options);
 
     if (!child.pid || !child.stdin || !child.stdout) {
+      this.activeLoopLock = null; // Release lock
       throw new Error("PROCESS_START_FAILED");
     }
 
@@ -475,150 +351,190 @@ export class RalphService {
     child.on("exit", (code) => {
       console.log(`[RalphService] Loop ${loopId} exited with code ${code}`);
       this.consoleLogger.logProcessStop(child.pid);
+
+      // Release lock
+      this.activeLoopLock = null;
+
+      // Cleanup
       this.pids.delete(loopId);
       this.activeProcesses.delete(loopId);
     });
 
     child.on("error", (err) => {
       console.error(`[RalphService] Loop ${loopId} error:`, err);
-      this.consoleLogger.logProcessStop(child.pid);
-      this.pids.delete(loopId);
-      this.activeProcesses.delete(loopId);
+      this.activeLoopLock = null; // Release lock
     });
 
-    // Wait a moment to ensure it started
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-
-    // Save PID
+    // Write PID file
     await fsp.writeFile(pidFile, child.pid.toString());
-    this.pids.set(loopId, child.pid);
 
-    // Log the start with console logger
-    this.consoleLogger.logProcessStart(child.pid, worktree.id, loopId);
+    // Update console logger
+    this.consoleLogger.logProcessStart(child.pid, `ralph-loop-${loopId}`);
 
-    // Also log to file
-    const logEntry = `[${new Date().toISOString()}] Started Ralph Iterative loop with PID: ${child.pid}\n`;
-    await fsp.appendFile(logFile, logEntry);
-
+    // Return loop info
     return {
       id: loopId,
-      worktree_id: request.worktree_id,
+      worktree_id: loopId,
+      branch_name: branchName,
       status: "running",
+      created_at: now,
+      updated_at: now,
       prompt: request.prompt,
+      completion_promise: request.completion_promise,
       iteration: 0,
-      max_iterations: 0,
-      completion_promise: request.completion_promise || null,
-      started_at: now,
-      process_id: child.pid,
+      total_subtasks: 0,
+      completed_subtasks: 0,
+      current_subtask: request.prompt,
+      slam_phase: "planning",
+      tokens: {
+        totalInput: 0,
+        totalOutput: 0,
+        byIteration: [],
+      },
+      files_changed: [],
+      machine: machineInfo,
     };
   }
 
   /**
-   * Stop a Ralph loop
+   * Stop a Ralph loop (kills process, optionally cleans up branch)
    */
-  async stopRalphLoop(loopId: string): Promise<void> {
-    const worktrees = await this.gitService.listWorktrees();
-    const worktree = worktrees.find((w) => w.id === loopId);
+  async stopRalphLoop(loopId: string, cleanupBranch: boolean = false): Promise<void> {
+    let stopped = false;
 
-    if (!worktree) {
-      throw new Error("WORKTREE_NOT_FOUND");
-    }
+    // Stop active process if found
+    const processInfo = this.activeProcesses.get(loopId);
+    if (processInfo) {
+      console.log(`[RalphService] Stopping loop ${loopId}...`);
 
-    const pidFile = path.join(PIDS_DIR, `${loopId}.pid`);
-    const stateFile = path.join(worktree.path, ".claude", "ralph-loop.local.md");
-    const logFile = path.join(LOGS_DIR, `${loopId}.log`);
-
-    // Kill process if running
-    if (await this.fileExists(pidFile)) {
-      const pid = parseInt(await fsp.readFile(pidFile, "utf-8"), 10);
-
-      try {
-        // Try graceful shutdown first
-        process.kill(pid, "SIGTERM");
-
-        // Wait a moment
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        // Force kill if still running
-        if (await this.isProcessRunning(pid)) {
-          process.kill(pid, "SIGKILL");
-        }
-      } catch {
-        // Process already dead
-      }
-
-      await fsp.unlink(pidFile);
-      this.pids.delete(loopId);
+      // Kill process
+      processInfo.process.kill("SIGTERM");
       this.activeProcesses.delete(loopId);
 
-      // Log the stop with console logger
-      this.consoleLogger.logProcessStop(pid);
+      // Release lock if this was the active loop
+      if (this.activeLoopLock === loopId) {
+        this.activeLoopLock = null;
+      }
 
-      const logEntry = `[${new Date().toISOString()}] Stopped Ralph loop (PID: ${pid})\n`;
-      await fsp.appendFile(logFile, logEntry);
+      stopped = true;
     }
 
-    // Remove state file (this signals the stop hook to allow exit)
-    if (await this.fileExists(stateFile)) {
-      await fsp.unlink(stateFile);
+    // Also check by PID
+    const pid = this.pids.get(loopId);
+    if (pid && await this.isProcessRunning(pid)) {
+      console.log(`[RalphService] Killing process ${pid} for loop ${loopId}`);
+      process.kill(pid, "SIGTERM");
+      this.pids.delete(loopId);
+
+      // Release lock if this was the active loop
+      if (this.activeLoopLock === loopId) {
+        this.activeLoopLock = null;
+      }
+
+      stopped = true;
     }
-  }
 
-  /**
-   * Parse Ralph loop state file
-   */
-  private parseStateFile(content: string): RalphLoopStateFile {
-    const frontmatterMatch = content.match(/^---\n([\s\S]+?)\n---\n([\s\S]*)$/);
-    if (!frontmatterMatch) {
-      throw new Error("INVALID_STATE_FILE");
-    }
-
-    const frontmatter = frontmatterMatch[1];
-    const prompt = frontmatterMatch[2].trim();
-
-    const state: Partial<RalphLoopStateFile> = {};
-    const lines = frontmatter.split("\n");
-
-    for (const line of lines) {
-      const match = line.match(/^(\w+):\s*(.+)$/);
-      if (match) {
-        const [, key, value] = match;
-        if (key === "active") {
-          state.active = value === "true";
-        } else if (key === "iteration" || key === "max_iterations") {
-          state[key] = parseInt(value, 10);
-        } else if (key === "completion_promise") {
-          state.completion_promise = value === "null" ? null : value;
-        } else if (key === "started_at") {
-          state.started_at = value;
-        }
+    // Clean up branch if requested
+    if (cleanupBranch) {
+      try {
+        await this.gitService.deleteBranch(loopId);
+        console.log(`[RalphService] Cleaned up branch for loop ${loopId}`);
+      } catch (error) {
+        console.error(`[RalphService] Failed to cleanup branch:`, error);
       }
     }
 
-    return {
-      active: state.active ?? true,
-      iteration: state.iteration ?? 0,
-      max_iterations: state.max_iterations ?? 0,
-      completion_promise: state.completion_promise ?? null,
-      started_at: state.started_at ?? new Date().toISOString(),
-      prompt: state.prompt || prompt,
-    };
+    return;
   }
 
   /**
-   * Format Ralph loop state file
+   * Get a specific Ralph loop
    */
-  private formatStateFile(state: RalphLoopStateFile): string {
-    return `---
-active: ${state.active}
-iteration: ${state.iteration}
-max_iterations: ${state.max_iterations}
-completion_promise: ${state.completion_promise ?? "null"}
-started_at: ${state.started_at}
----
+  async getRalphLoop(loopId: string): Promise<RalphLoop | null> {
+    const loops = await this.listRalphLoops();
+    return loops.find(l => l.id === loopId) || null;
+  }
 
-${state.prompt}
-`;
+  /**
+   * Get logs for a Ralph loop
+   */
+  async getRalphLoopLogs(loopId: string): Promise<string> {
+    const logFile = path.join(LOGS_DIR, `${loopId}.log`);
+    try {
+      return await fsp.readFile(logFile, "utf-8");
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Get commits from current branch
+   */
+  async getRalphLoopCommits(loopId: string): Promise<RalphLoopCommit[]> {
+    const commits = await this.gitService.getRecentCommits(10);
+
+    return commits.map(c => ({
+      hash: c.hash,
+      message: c.message,
+      timestamp: c.timestamp,
+    }));
+  }
+
+  /**
+   * Find Ralph Iterative state files in scan directories
+   */
+  private async findRalphIterativeStateFiles(): Promise<Array<{ filePath: string; projectName: string }>> {
+    const files: Array<{ filePath: string; projectName: string }> = [];
+
+    for (const scanDir of RALPH_SCAN_DIRS) {
+      try {
+        await fsp.access(scanDir);
+
+        // Recursively find .ralph-iterative.*.json files
+        const entries = await this.findFilesRecursive(scanDir, ".ralph-iterative.*.json");
+
+        for (const filePath of entries) {
+          // Extract project name from path
+          const parts = filePath.split(path.sep);
+          const projectName = parts[parts.length - 2]; // Parent directory name
+
+          files.push({ filePath, projectName });
+        }
+      } catch {
+        // Ignore access errors
+      }
+    }
+
+    return files;
+  }
+
+  /**
+   * Recursively find files matching pattern
+   */
+  private async findFilesRecursive(dir: string, pattern: string): Promise<string[]> {
+    const files: string[] = [];
+
+    try {
+      const entries = await fsp.readdir(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        if (entry.isDirectory()) {
+          // Skip node_modules and .git
+          if (entry.name === "node_modules" || entry.name === ".git") {
+            continue;
+          }
+          files.push(...await this.findFilesRecursive(fullPath, pattern));
+        } else if (entry.isFile() && entry.name.match(pattern)) {
+          files.push(fullPath);
+        }
+      }
+    } catch (error) {
+      // Ignore readdir errors
+    }
+
+    return files;
   }
 
   /**
@@ -638,7 +554,7 @@ ${state.prompt}
    */
   private async isProcessRunning(pid: number): Promise<boolean> {
     try {
-      process.kill(pid, 0); // Signal 0 checks if process exists
+      process.kill(pid, 0);
       return true;
     } catch {
       return false;
@@ -646,167 +562,48 @@ ${state.prompt}
   }
 
   /**
-   * Get git remote and branch info for a directory
+   * Detect machine resources
    */
-  private async getGitInfo(projectDir: string): Promise<{
-    remote: string | null;
-    branch: string | null;
-  }> {
+  private async detectMachineResources(): Promise<any> {
     try {
-      // Get current branch
-      let branch: string | null = null;
-      try {
-        const { stdout: branchOutput } = await execAsync(
-          `cd "${projectDir}" && git rev-parse --abbrev-ref HEAD`,
-        );
-        branch = branchOutput.trim() || null;
-      } catch {
-        branch = null;
-      }
+      const os = await import("os");
+      const { cpus } = os;
 
-      // Get remote URL (origin)
-      let remote: string | null = null;
-      try {
-        const { stdout: remoteOutput } = await execAsync(
-          `cd "${projectDir}" && git config --get remote.origin.url`,
-        );
-        const remoteUrl = remoteOutput.trim();
-        // Extract owner/repo from URL (handles both https and ssh)
-        // https://github.com/ebowwa/seed.git -> ebowwa/seed
-        // git@github.com:ebowwa/seed.git -> ebowwa/seed
-        const match = remoteUrl.match(/[:/]([^\/]+\/[^\/\.]+)(\.git)?$/);
-        remote = match ? match[1] : remoteUrl || null;
-      } catch {
-        remote = null;
-      }
-
-      return { remote, branch };
-    } catch {
-      return { remote: null, branch: null };
+      return {
+        cpu: {
+          count: cpus().length,
+          model: cpus()[0]?.model || "unknown",
+        },
+        memory: {
+          total: os.totalmem(),
+          free: os.freemem(),
+        },
+        platform: {
+          os: os.platform(),
+          arch: os.arch(),
+        },
+      };
+    } catch (error) {
+      console.error("Failed to detect machine resources:", error);
+      return {
+        cpu: { count: 1, model: "unknown" },
+        memory: { total: 0, free: 0 },
+        platform: { os: "unknown", arch: "unknown" },
+      };
     }
   }
 
   /**
-   * Detect machine resources for Ralph Iterative SLAM
+   * Cleanup old branches (TTL-based)
    */
-  private async detectMachineResources(): Promise<{
-    cpu: { count: number; model: string; tier: string };
-    memory: { total: number; free: number; tier: string };
-    disk: { total: number; available: number; tier: string };
-    platform: { os: string; arch: string; isContainer: boolean };
-    capacity: string;
-    score: number;
-  }> {
-    const os = require("os");
-
-    // CPU info
-    const cpuCount = os.cpus().length;
-    const cpuModel = os.cpus()[0]?.model || "Unknown";
-    let cpuTier = "low";
-    if (cpuCount >= 16) cpuTier = "high";
-    else if (cpuCount >= 8) cpuTier = "medium";
-
-    // Memory info (in GB)
-    const totalMem = os.totalmem();
-    const freeMem = os.freemem();
-    const usedMem = totalMem - freeMem;
-    const totalMemGB = Math.round(totalMem / (1024 ** 3));
-    let memTier = "low";
-    if (totalMemGB >= 32) memTier = "high";
-    else if (totalMemGB >= 16) memTier = "medium";
-
-    // Disk info
-    let diskTotal = 0;
-    let diskAvailable = 0;
-    let diskTier = "low";
-    try {
-      const { stdout: dfOutput } = await execAsync("df -h / | tail -1");
-      const parts = dfOutput.trim().split(/\s+/);
-      // Parse size (e.g., "100G" -> 100 GB)
-      const sizeStr = parts[1];
-      const availStr = parts[3];
-      diskTotal = this.parseSizeToGB(sizeStr);
-      diskAvailable = this.parseSizeToGB(availStr);
-      if (diskTotal >= 500) diskTier = "high";
-      else if (diskTotal >= 200) diskTier = "medium";
-    } catch {
-      // Fallback values
-      diskTotal = 100;
-      diskAvailable = 50;
-    }
-
-    // Platform info
-    const platform = {
-      os: os.type(),
-      arch: os.arch(),
-      isContainer: await this.checkIfContainer(),
-    };
-
-    // Calculate capacity score (0-100)
-    const cpuScore = Math.min((cpuCount / 32) * 30, 30);
-    const memScore = Math.min((totalMemGB / 128) * 30, 30);
-    const diskScore = Math.min((diskTotal / 1000) * 20, 20);
-    const bonusScore = platform.isContainer ? 10 : 5;
-    const score = Math.round(cpuScore + memScore + diskScore + bonusScore);
-
-    // Capacity tier
-    let capacity = "low";
-    if (score >= 70) capacity = "high";
-    else if (score >= 40) capacity = "medium";
-
-    return {
-      cpu: { count: cpuCount, model: cpuModel, tier: cpuTier },
-      memory: { total: totalMemGB, free: Math.round(freeMem / (1024 ** 3)), tier: memTier },
-      disk: { total: diskTotal, available: diskAvailable, tier: diskTier },
-      platform,
-      capacity,
-      score,
-    };
+  async cleanupOldBranches(maxAgeHours: number = 24): Promise<{ deleted: string[]; errors: Record<string, string> }> {
+    return await this.gitService.cleanupOldBranches(maxAgeHours);
   }
 
   /**
-   * Check if running in a container
+   * Get active process for streaming (WebSocket support)
    */
-  private async checkIfContainer(): Promise<boolean> {
-    try {
-      // Check for Docker/.dockerenv
-      await execAsync("test -f /.dockerenv");
-      return true;
-    } catch {
-      // Not Docker, check for containerd cgroup
-      try {
-        const { stdout } = await execAsync("cat /proc/1/cgroup");
-        return stdout.includes("docker") || stdout.includes("containerd");
-      } catch {
-        return false;
-      }
-    }
-  }
-
-  /**
-   * Parse size string to GB (e.g., "100G" -> 100, "500M" -> 0.5)
-   */
-  private parseSizeToGB(sizeStr: string): number {
-    const match = sizeStr.match(/^([\d.]+)([KMGT]?)(i?B?)?$/i);
-    if (!match) return 0;
-
-    const value = parseFloat(match[1]);
-    const unit = match[2].toUpperCase();
-
-    switch (unit) {
-      case "T": return value * 1024;
-      case "G": return value;
-      case "M": return value / 1024;
-      case "K": return value / (1024 * 1024);
-      default: return value;
-    }
-  }
-
-  /**
-   * Get process handle for WebSocket oversight
-   * Returns { stdin, stdout } for bidirectional communication with a running Ralph loop
-   */
-  getProcess(loopId: string): { process: ReturnType<typeof spawn>, stdout: Readable, stdin: Writable } | undefined {
+  getActiveProcess(loopId: string) {
     return this.activeProcesses.get(loopId);
   }
 }

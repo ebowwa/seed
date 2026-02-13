@@ -3,6 +3,15 @@
 import { RalphService } from "./services/ralph";
 import { GitService } from "./services/git";
 import { ConsoleLoggerService } from "./services/console-logger";
+import {
+  initializeStateService,
+  getState,
+  saveState,
+  syncRalphLoops,
+  runHealthChecks,
+  getHealthStatus,
+  getStateManager as getSMInstance,
+} from "./services/state-service";
 import type {
   NodeStatus,
   CreateWorktreeRequest,
@@ -30,6 +39,34 @@ const CONSOLE_LOGGING_ENABLED = process.env.CONSOLE_LOGGING_ENABLED !== "false";
 const gitService = new GitService();
 const ralphService = new RalphService();
 const consoleLogger = new ConsoleLoggerService();
+
+// ============================================================================
+// State Service Initialization
+// ============================================================================
+
+async function initializeStateSystem(): Promise<void> {
+  try {
+    console.log("[Seed State Service] Initializing...");
+    await initializeStateService();
+    console.log("[Seed State Service] ✓ Initialized");
+
+    const healthStatus = getHealthStatus();
+    console.log(`[Seed State Service] Health status: ${healthStatus.status}`);
+
+    if (healthStatus.issues.length > 0) {
+      console.log("[Seed State Service] Issues:", healthStatus.issues);
+    }
+
+  } catch (error) {
+    console.error("[Seed State Service] Initialization failed:", error);
+    // Continue anyway - state is optional
+  }
+}
+
+// Initialize state service on startup
+initializeStateSystem().catch(err => {
+  console.error("[Seed State Service] Fatal initialization error:", err);
+});
 
 // ============================================================================
 // Utility Functions
@@ -82,10 +119,132 @@ async function handleRequest(req: Request): Promise<Response> {
 
   try {
     // ========================================================================
+    // GET /api/state - Get complete Seed state
+    // ========================================================================
+    if (url.pathname === "/api/state" && method === "GET") {
+      const sm = getSMInstance();
+      const state = getState();
+      if (!state) {
+        return errorResponse("STATE_NOT_INITIALIZED", "State service not initialized");
+      }
+
+      // Refresh machine context, network info, and health checks
+      await sm.updateMachineContext();
+      await sm.updateNetworkInfo();
+      await sm.runHealthChecks();
+
+      // Sync Ralph loops from disk
+      await sm.syncRalphLoopsFromDisk();
+
+      // Save updated state
+      await sm.saveState();
+
+      return jsonResponse({ state }, { headers });
+    }
+
+    // ========================================================================
+    // POST /api/state/sync - Sync Ralph loops from disk
+    // ========================================================================
+    if (url.pathname === "/api/state/sync" && method === "POST") {
+      await syncRalphLoops();
+      await saveState();
+
+      const state = getState();
+      return jsonResponse({
+        success: true,
+        ralph_loops_count: Object.keys(state?.ralphLoops || {}).length,
+      }, { headers });
+    }
+
+    // ========================================================================
+    // POST /api/state/health - Run health checks
+    // ========================================================================
+    if (url.pathname === "/api/state/health" && method === "POST") {
+      await runHealthChecks();
+      await saveState();
+
+      const state = getState();
+      const healthStatus = getHealthStatus();
+
+      return jsonResponse({
+        status: healthStatus.status,
+        issues: healthStatus.issues,
+        checks: state?.health?.checks,
+      }, { headers });
+    }
+
+    // ========================================================================
+    // GET /api/state/history - Get action history
+    // ========================================================================
+    if (url.pathname === "/api/state/history" && method === "GET") {
+      const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+      const state = getState();
+
+      if (!state) {
+        return errorResponse("STATE_NOT_INITIALIZED", "State service not initialized");
+      }
+
+      const actions = state.history.actions.slice(-limit);
+
+      return jsonResponse({
+        actions,
+        total_count: state.history.actions.length,
+        total_actions: state.history.totalActions,
+      }, { headers });
+    }
+
+    // ========================================================================
+    // GET /api/state/tokens - Get token usage statistics
+    // ========================================================================
+    if (url.pathname === "/api/state/tokens" && method === "GET") {
+      const state = getState();
+
+      if (!state) {
+        return errorResponse("STATE_NOT_INITIALIZED", "State service not initialized");
+      }
+
+      return jsonResponse({
+        total_input: state.tokenUsage?.totalInput || 0,
+        total_output: state.tokenUsage?.totalOutput || 0,
+        by_session: state.tokenUsage?.bySession || {},
+        by_loop: state.tokenUsage?.byLoop || {},
+      }, { headers });
+    }
+
+    // ========================================================================
+    // GET /api/state/work-memory - Get work memory
+    // ========================================================================
+    if (url.pathname === "/api/state/work-memory" && method === "GET") {
+      const state = getState();
+
+      if (!state) {
+        return errorResponse("STATE_NOT_INITIALIZED", "State service not initialized");
+      }
+
+      return jsonResponse({
+        completed_files: state.workMemory?.completedFiles || [],
+        file_count: state.workMemory?.completedFiles.length || 0,
+        checksums_count: Object.keys(state.workMemory?.fileChecksums || {}).length,
+      }, { headers });
+    }
+
+    // ========================================================================
+    // POST /api/state/save - Manually save state
+    // ========================================================================
+    if (url.pathname === "/api/state/save" && method === "POST") {
+      await saveState();
+
+      return jsonResponse({
+        success: true,
+        last_updated: getState()?.lastUpdated,
+      }, { headers });
+    }
+
+    // ========================================================================
     // GET /api/status
     // ========================================================================
     if (url.pathname === "/api/status" && method === "GET") {
-      const worktrees = await gitService.listWorktrees();
+      const worktrees = await gitService.listBranches();
       const ralphLoops = await ralphService.listRalphLoops();
 
       // Update console logger with latest Ralph loops
@@ -116,16 +275,15 @@ async function handleRequest(req: Request): Promise<Response> {
     }
 
     // ========================================================================
-    // GET /api/worktrees
-    // TODO: Worktree CRUD endpoints not tested with actual git worktrees
+    // GET /api/worktrees (now returns branches for backward compatibility)
     // ========================================================================
     if (url.pathname === "/api/worktrees" && method === "GET") {
-      const worktrees = await gitService.listWorktrees();
-      return jsonResponse({ worktrees }, { headers });
+      const branches = await gitService.listBranches();
+      return jsonResponse({ worktrees: branches }, { headers });
     }
 
     // ========================================================================
-    // POST /api/worktrees
+    // POST /api/worktrees (now creates a branch for backward compatibility)
     // ========================================================================
     if (url.pathname === "/api/worktrees" && method === "POST") {
       const body = (await req.json()) as CreateWorktreeRequest;
@@ -134,12 +292,12 @@ async function handleRequest(req: Request): Promise<Response> {
         return errorResponse("INVALID_REQUEST", "Missing required fields: id, branch");
       }
 
-      const worktree = await gitService.createWorktree(body);
-      return jsonResponse({ worktree }, { headers });
+      const branch = await gitService.createBranch(body);
+      return jsonResponse({ worktree: branch }, { headers });
     }
 
     // ========================================================================
-    // DELETE /api/worktrees/:id
+    // DELETE /api/worktrees/:id (now deletes a branch for backward compatibility)
     // ========================================================================
     if (url.pathname.startsWith("/api/worktrees/") && method === "DELETE") {
       const worktreeId = url.pathname.split("/").pop();
@@ -147,12 +305,36 @@ async function handleRequest(req: Request): Promise<Response> {
         return errorResponse("INVALID_REQUEST", "Missing worktree ID");
       }
 
-      await ralphService.stopRalphLoop(worktreeId).catch(() => {
+      await ralphService.stopRalphLoop(worktreeId, true).catch(() => {
         // Ignore if no loop was running
       });
-      await gitService.removeWorktree(worktreeId);
+
+      await gitService.deleteBranch(worktreeId);
 
       return jsonResponse({ success: true }, { headers });
+    }
+
+    // ========================================================================
+    // POST /api/worktrees/:id/pr - Create a Pull Request to dev
+    // ========================================================================
+    if (url.pathname.startsWith("/api/worktrees/") && url.pathname.endsWith("/pr") && method === "POST") {
+      const worktreeId = url.pathname.split("/")[3]; // /api/worktrees/{id}/pr
+      if (!worktreeId) {
+        return errorResponse("INVALID_REQUEST", "Missing worktree ID");
+      }
+
+      const body = await req.json();
+      const result = await gitService.createPrToDev({
+        branchId: worktreeId,
+        title: body.title,
+        body: body.body,
+      });
+
+      if (!result) {
+        return errorResponse("PR_EXISTS", "A PR already exists for this branch");
+      }
+
+      return jsonResponse({ pr: result }, { headers });
     }
 
     // ========================================================================
@@ -196,6 +378,7 @@ async function handleRequest(req: Request): Promise<Response> {
 
     // ========================================================================
     // DELETE /api/ralph-loops/:id
+    // Query params: cleanup_branch=true to delete the branch
     // ========================================================================
     if (url.pathname.startsWith("/api/ralph-loops/") && method === "DELETE") {
       const loopId = url.pathname.split("/").pop();
@@ -203,7 +386,8 @@ async function handleRequest(req: Request): Promise<Response> {
         return errorResponse("INVALID_REQUEST", "Missing loop ID");
       }
 
-      await ralphService.stopRalphLoop(loopId);
+      const cleanupBranch = url.searchParams.get("cleanup_branch") === "true";
+      await ralphService.stopRalphLoop(loopId, cleanupBranch);
       return jsonResponse({ success: true }, { headers });
     }
 
@@ -1062,6 +1246,7 @@ console.log(`   GET    /api/status`);
 console.log(`   GET    /api/worktrees`);
 console.log(`   POST   /api/worktrees`);
 console.log(`   DELETE /api/worktrees/:id`);
+console.log(`   POST   /api/worktrees/:id/pr  (NEW - Create PR to dev)`);
 console.log(`   GET    /api/ralph-loops`);
 console.log(`   POST   /api/ralph-loops`);
 console.log(`   GET    /api/ralph-loops/:id`);
