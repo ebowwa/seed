@@ -47,6 +47,21 @@
   },
   "dependencies": {
     "@ebowwa/bash-ops": "^1.0.1",
-    "@ebowwa/terminal": "^0.3.0"
+    "@ebowwa/terminal": "^0.3.0",
+    "@ebowwa/hetzner-mcp": "^1.2.2",
+    "@ebowwa/tailscale": "^1.1.1",
+    "@ebowwa/npm-publish-mcp": "^1.0.0",
+    "@ebowwa/git-mcp": "^1.0.0",
+    "@ebowwa/workspace-mcp": "^1.1.0",
+    "@ebowwa/dependency-graph-mcp": "^1.0.0",
+    "@ebowwa/claude-code-mcp": "^1.1.0",
+    "@ebowwa/claude-code-config-mcp": "^1.0.0",
+    "@ebowwa/claude-code-history-mcp": "^1.1.2",
+    "@ebowwa/github-search-mcp": "^1.0.1",
+    "@ebowwa/tooling-mcp": "^0.1.0",
+    "@mcp/googlesheets": "^1.0.0",
+    "@ebowwa/lmdb-mcp": "^1.0.0",
+    "@mcp/registry": "^1.0.0",
+    "state-mcp": "^1.0.0"
   }
 }
