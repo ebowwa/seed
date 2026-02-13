@@ -8,7 +8,6 @@ This node runs three core services:
 |---------|------|---------|--------|
 | `node-agent.service` | 8911 | Ralph loop orchestration API | ✅ Running |
 | `telegram-bot.service` | - | Telegram interface to Claude Code | ✅ Running |
-| `tailscaled.service` | - | VPN mesh networking | ✅ Running |
 
 ---
 
@@ -35,24 +34,10 @@ git checkout dev  # Always work on dev branch
 
 # Verify git config
 git config --global user.name "seed-node-prod"
-git config --global user.email "seed@tail9f1fc.ts.net"
+git config --global user.email "seed@node.tailnet"
 ```
 
-### 3. Tailscale Setup
-
-```bash
-# Install Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Authenticate (requires one-time interaction)
-tailscale up --authkey=<your-auth-key>
-
-# Verify connection
-tailscale status
-tailscale ip -4
-```
-
-### 4. Doppler Setup (Secrets Management)
+### 3. Doppler Setup (Secrets Management)
 
 ```bash
 # Install Doppler CLI
@@ -243,28 +228,6 @@ git worktree prune
 ```bash
 ls -la /root/repos/main-repo/.git
 # Should be owned by root and have proper permissions
-```
-
----
-
-### Tailscale Connection Issues
-
-**Symptom**: Can't reach other nodes, or node shows offline
-
-#### Check Status
-```bash
-tailscale status
-tailscale ip -4
-```
-
-#### Check Service
-```bash
-systemctl status tailscaled.service
-```
-
-#### Restart if Needed
-```bash
-systemctl restart tailscaled.service
 ```
 
 ---

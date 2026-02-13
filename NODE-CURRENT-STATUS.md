@@ -1,8 +1,7 @@
 # Seed Node Production - Current Status
 
 **Node ID**: `seed-node-prod`
-**Tailscale IP**: `100.71.68.25`
-**Last Updated**: 2026-02-13 17:26 UTC
+**Last Updated**: 2026-02-13 17:40 UTC
 
 ---
 
@@ -21,12 +20,10 @@
 |---------|--------|------|-------|
 | `node-agent.service` | ✅ Running | 8911 | API responding |
 | `telegram-bot.service` | ✅ Running | - | Claude Code interface |
-| `tailscaled.service` | ✅ Running | - | VPN connected |
 
 ### Network
 | Component | Status | Value |
 |-----------|--------|-------|
-| Tailscale | ✅ Connected | 100.71.68.25 |
 | Node Agent API | ✅ Listening | :8911 |
 | SSH | ✅ Listening | :22 |
 
@@ -93,10 +90,9 @@ Node is ready to accept work.
 
 1. ✅ **Node Agent API**: Fully operational, accepts requests
 2. ✅ **Telegram Bot**: Running, connects to Claude Code
-3. ✅ **Tailscale**: Connected to mesh network
-4. ✅ **Git Repository**: Clean, on dev branch
-5. ✅ **Configuration**: Properly configured for worker node
-6. ✅ **Health Monitoring**: Automated checks passing
+3. ✅ **Git Repository**: Clean, on dev branch
+4. ✅ **Configuration**: Properly configured for worker node
+5. ✅ **Health Monitoring**: Automated checks passing
 
 ---
 
@@ -162,7 +158,6 @@ WS     /api/ralph-loops/:id/ws      # Real-time oversight
 | SSH key auth only | ✅ (assumed) |
 | Fail2Ban | ✅ Running |
 | Unattended upgrades | ✅ Running |
-| Tailscale authenticated | ✅ Yes |
 | Secrets in Doppler | ✅ Yes |
 | GitHub token scoped | ✅ repo, public_repo |
 

@@ -5,7 +5,6 @@
 ### System Stabilization
 - [x] Node agent service running cleanly
 - [x] Telegram bot service running
-- [x] Tailscale VPN connected
 - [x] Git repository cleaned up (removed stale worktrees)
 - [x] Configuration properly set (.env created)
 - [x] PM daemon disabled on worker node
@@ -33,7 +32,6 @@
 
 # - Detect OS and install dependencies
 # - Install Bun runtime
-# - Install Tailscale and authenticate
 # - Clone repositories (seed, ralph)
 # - Set up systemd services
 # - Create .env with proper defaults
@@ -53,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/ebowwa/seed/main/scripts/setup-node
 **Requirements**:
 - Nodes auto-register on startup
 - Central registry (could be a simple YAML file or database)
-- Node metadata: ID, Tailscale IP, capacity, capabilities
+- Node metadata: ID, IP, capacity, capabilities
 - Health status tracking
 
 **Implementation options**:
@@ -70,7 +68,6 @@ curl -fsSL https://raw.githubusercontent.com/ebowwa/seed/main/scripts/setup-node
 
 nodes:
   - id: seed-node-prod
-    tailscale_ip: 100.71.68.25
     capacity:
       max_loops: 2
       cpu_cores: 2
@@ -81,7 +78,6 @@ nodes:
     pm_daemon: false  # Worker node
 
   - id: seed-node-coordinator
-    tailscale_ip: 100.71.xx.xx
     capacity:
       max_loops: 4
       cpu_cores: 4
@@ -254,7 +250,6 @@ Use this when setting up new nodes:
 
 ### Services
 - Doppler: https://dashboard.doppler.com/project/seed/prd
-- Tailscale: https://login.tailscale.com/
 
 ---
 

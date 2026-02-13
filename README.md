@@ -37,7 +37,6 @@ cd seed
 | **Claude Code** | AI coding assistant |
 | **GitHub CLI** | GitHub from terminal |
 | **Doppler** | Secrets management |
-| **Tailscale** | Zero-config VPN |
 | **OrbStack** | Fast Docker & Linux VMs (macOS) |
 | **Vision MCP** | Image/video analysis (Z.ai) |
 | **Web Search MCP** | Real-time web search (Z.ai) |
@@ -92,13 +91,11 @@ doppler run --project seed --config prd -- claude '/quit' -p
 ```
 Coordinator Node (seed-node-prod)
 ├── PM Daemon: Orchestrates work across nodes
-├── Node Agent API: http://100.71.68.25:8911
-└── Tailscale VPN: Connects all nodes
+└── Node Agent API: :8911
 
 Worker Nodes (seed-node-1, seed-node-2, ...)
 ├── Node Agent: Executes assigned tasks
-├── Ralph Iterative: Runs autonomous loops
-└── Tailscale VPN: Private mesh network
+└── Ralph Iterative: Runs autonomous loops
 ```
 
 ### Quick Setup for New Nodes
@@ -112,10 +109,7 @@ git clone https://github.com/ebowwa/seed.git
 cd seed
 ./setup.sh
 
-# 3. Connect to VPN
-tailscale up
-
-# 4. Register with coordinator
+# 3. Register with coordinator
 curl -X POST http://100.71.68.25:8911/api/nodes/register \
   -H "Content-Type: application/json" \
   -d '{"node_name": "seed-node-1", "role": "worker"}'
@@ -125,13 +119,13 @@ curl -X POST http://100.71.68.25:8911/api/nodes/register \
 
 ```bash
 # Check node health
-curl http://100.71.68.25:8911/api/health
+curl http://localhost:8911/api/health
 
 # List all nodes
-curl http://100.71.68.25:8911/api/nodes
+curl http://localhost:8911/api/nodes
 
 # Submit work to node
-curl -X POST http://100.71.68.25:8911/api/ralph/start \
+curl -X POST http://localhost:8911/api/ralph/start \
   -H "Content-Type: application/json" \
   -d '{"prompt": "Fix the authentication bug", "target_node": "seed-node-1"}'
 ```

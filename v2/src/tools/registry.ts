@@ -15,6 +15,21 @@ import { NodeTool } from "./node";
 import { TmuxTool } from "./tmux";
 import { RalphTool } from "./ralph";
 import { BashOpsTool } from "./bash-ops";
+import { HetznerMCPTool } from "./hetzner-mcp";
+import { TailscaleMCPTool } from "./tailscale-mcp";
+import { NpmPublishMCPTool } from "./npm-publish-mcp";
+import { GitMCPTool } from "./git-mcp";
+import { WorkspaceMCPTool } from "./workspace-mcp";
+import { DependencyGraphMCPTool } from "./dependency-graph-mcp";
+import { ClaudeCodeMCPTool } from "./claude-code-mcp";
+import { ClaudeCodeConfigMCPTool } from "./claude-code-config-mcp";
+import { ClaudeCodeHistoryMCPTool } from "./claude-code-history-mcp";
+import { GitHubSearchMCPTool } from "./github-search-mcp";
+import { ToolingMCPTool } from "./tooling-mcp";
+import { GoogleSheetsMCPTool } from "./googlesheets-mcp";
+import { LmdbMCPTool } from "./lmdb-mcp";
+import { McpRegistryTool } from "./mcp-registry";
+import { StateMCPTool } from "./state-mcp";
 
 export interface Tool {
   name: string;
@@ -58,6 +73,22 @@ export class ToolRegistry {
       new GhTool(),
       new DopplerTool(),
       new BashOpsTool(),
+      // MCP Tools
+      new HetznerMCPTool(),
+      new TailscaleMCPTool(),
+      new NpmPublishMCPTool(),
+      new GitMCPTool(),
+      new WorkspaceMCPTool(),
+      new DependencyGraphMCPTool(),
+      new ClaudeCodeMCPTool(),
+      new ClaudeCodeConfigMCPTool(),
+      new ClaudeCodeHistoryMCPTool(),
+      new GitHubSearchMCPTool(),
+      new ToolingMCPTool(),
+      new GoogleSheetsMCPTool(),
+      new LmdbMCPTool(),
+      new McpRegistryTool(),
+      new StateMCPTool(),
     ];
   }
 
