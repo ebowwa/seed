@@ -46,6 +46,7 @@
     "@types/bun": "latest"
   },
   "dependencies": {
-    "@ebowwa/bash-ops": "^1.0.1"
+    "@ebowwa/bash-ops": "^1.0.1",
+    "@ebowwa/terminal": "^0.3.0"
   }
 }
