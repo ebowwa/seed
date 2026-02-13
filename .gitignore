@@ -49,3 +49,4 @@ env/
 *.cert
 doppler.envv2/seed-setup
 tests/results/
+.seed-setup-complete
