@@ -45,5 +45,7 @@
   "devDependencies": {
     "@types/bun": "latest"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@ebowwa/bash-ops": "^1.0.1"
+  }
 }

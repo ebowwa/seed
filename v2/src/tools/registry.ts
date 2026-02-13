@@ -14,6 +14,7 @@ import { DopplerTool } from "./doppler";
 import { NodeTool } from "./node";
 import { TmuxTool } from "./tmux";
 import { RalphTool } from "./ralph";
+import { BashOpsTool } from "./bash-ops";
 
 export interface Tool {
   name: string;
@@ -56,6 +57,7 @@ export class ToolRegistry {
       new RalphTool(),
       new GhTool(),
       new DopplerTool(),
+      new BashOpsTool(),
     ];
   }
 
