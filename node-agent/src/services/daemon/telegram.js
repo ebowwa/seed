@@ -1,7 +1,10 @@
 "use strict";
-// Telegram Bot API Client Service
-// Implements long-polling for inbound messages, sendMessage for outbound
-// Based on clawdbot's exponential backoff approach for error handling
+/**
+ * Telegram Channel Adapter for Node Agent
+ *
+ * Implements ChannelConnector from @ebowwa/channel-types.
+ * Adds specialized features: offset persistence, exponential backoff.
+ */
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -39,7 +42,9 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
     }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TelegramService = void 0;
+exports.TelegramService = exports.TelegramChannel = void 0;
+exports.createTelegramConfigFromEnv = createTelegramConfigFromEnv;
+var channel_types_1 = require("@ebowwa/channel-types");
 // Configuration
 var TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 var TELEGRAM_CHAT_ID = parseInt(process.env.TELEGRAM_CHAT_ID || "", 10);
@@ -51,11 +56,40 @@ var MAX_BACKOFF_MS = 30000; // 30 seconds max backoff
 var INITIAL_BACKOFF_MS = 2000; // 2 seconds initial backoff
 var BACKOFF_MULTIPLIER = 1.8;
 var JITTER_PERCENT = 0.25; // 25% jitter
-var TelegramService = /** @class */ (function () {
-    function TelegramService() {
+/**
+ * TelegramChannel - Implements ChannelConnector for Node Agent
+ *
+ * Features:
+ * - Long polling with exponential backoff
+ * - Offset persistence for crash recovery
+ * - Normalized ChannelMessage format
+ */
+var TelegramChannel = /** @class */ (function () {
+    function TelegramChannel() {
+        this.label = "Telegram (Node Agent)";
+        this.capabilities = {
+            supports: {
+                text: true,
+                media: true,
+                replies: true,
+                threads: false,
+                reactions: false,
+                editing: true,
+                streaming: false,
+            },
+            media: {
+                maxFileSize: 50 * 1024 * 1024, // 50MB
+                supportedMimeTypes: ["image/*", "video/*", "audio/*", "application/pdf"],
+            },
+            rateLimits: {
+                messagesPerMinute: 30,
+                charactersPerMessage: 4096,
+            },
+        };
         this.offset = 0;
         this.isPolling = false;
         this.currentBackoff = INITIAL_BACKOFF_MS;
+        this.connected = false;
         if (!TELEGRAM_BOT_TOKEN) {
             throw new Error("TELEGRAM_BOT_TOKEN is required");
         }
@@ -65,13 +99,106 @@ var TelegramService = /** @class */ (function () {
         this.token = TELEGRAM_BOT_TOKEN;
         this.allowedChatId = TELEGRAM_CHAT_ID;
         this.apiUrl = TELEGRAM_API_URL;
+        this.id = (0, channel_types_1.createChannelId)("telegram", TELEGRAM_CHAT_ID.toString());
         // Load offset from file if exists
         this.loadOffset();
     }
+    // ============================================================
+    // ChannelConnector Interface Implementation
+    // ============================================================
+    /**
+     * Start the channel (begin polling)
+     */
+    TelegramChannel.prototype.start = function () {
+        return __awaiter(this, void 0, void 0, function () {
+            var _this = this;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0: return [4 /*yield*/, this.startPolling({
+                            onUpdate: function (update) { return __awaiter(_this, void 0, void 0, function () {
+                                var channelMessage;
+                                return __generator(this, function (_a) {
+                                    switch (_a.label) {
+                                        case 0:
+                                            if (!(update.message && this.messageHandler)) return [3 /*break*/, 2];
+                                            channelMessage = this.createChannelMessage(update.message);
+                                            return [4 /*yield*/, this.messageHandler(channelMessage)];
+                                        case 1:
+                                            _a.sent();
+                                            _a.label = 2;
+                                        case 2: return [2 /*return*/];
+                                    }
+                                });
+                            }); },
+                            onError: function (error) {
+                                console.error("[TelegramChannel] Polling error:", error);
+                            },
+                        })];
+                    case 1:
+                        _a.sent();
+                        this.connected = true;
+                        return [2 /*return*/];
+                }
+            });
+        });
+    };
+    /**
+     * Stop the channel
+     */
+    TelegramChannel.prototype.stop = function () {
+        return __awaiter(this, void 0, void 0, function () {
+            return __generator(this, function (_a) {
+                this.stopPolling();
+                this.connected = false;
+                return [2 /*return*/];
+            });
+        });
+    };
+    /**
+     * Register message handler
+     */
+    TelegramChannel.prototype.onMessage = function (handler) {
+        this.messageHandler = handler;
+    };
+    /**
+     * Send response to Telegram
+     */
+    TelegramChannel.prototype.send = function (response) {
+        return __awaiter(this, void 0, void 0, function () {
+            var chatId;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0:
+                        chatId = parseInt(response.replyTo.channelId.accountId, 10);
+                        if (isNaN(chatId)) {
+                            console.error("[TelegramChannel] Invalid chat ID in response");
+                            return [2 /*return*/];
+                        }
+                        return [4 /*yield*/, this.sendText(response.content.text, {
+                                reply_to_message_id: response.content.replyToOriginal
+                                    ? parseInt(response.replyTo.messageId, 10)
+                                    : undefined,
+                            })];
+                    case 1:
+                        _a.sent();
+                        return [2 /*return*/];
+                }
+            });
+        });
+    };
+    /**
+     * Check if connected
+     */
+    TelegramChannel.prototype.isConnected = function () {
+        return this.connected;
+    };
+    // ============================================================
+    // Telegram-Specific Implementation
+    // ============================================================
     /**
      * Load the last processed update_id from disk
      */
-    TelegramService.prototype.loadOffset = function () {
+    TelegramChannel.prototype.loadOffset = function () {
         return __awaiter(this, void 0, void 0, function () {
             var fsp, offsetData, _a;
             return __generator(this, function (_b) {
@@ -85,7 +212,7 @@ var TelegramService = /** @class */ (function () {
                     case 2:
                         offsetData = _b.sent();
                         this.offset = parseInt(offsetData.trim(), 10);
-                        console.log("[TelegramService] Loaded offset: ".concat(this.offset));
+                        console.log("[TelegramChannel] Loaded offset: ".concat(this.offset));
                         return [3 /*break*/, 4];
                     case 3:
                         _a = _b.sent();
@@ -100,7 +227,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Save the current offset to disk
      */
-    TelegramService.prototype.saveOffset = function () {
+    TelegramChannel.prototype.saveOffset = function () {
         return __awaiter(this, void 0, void 0, function () {
             var fsp, homeDir, error_1;
             return __generator(this, function (_a) {
@@ -120,7 +247,7 @@ var TelegramService = /** @class */ (function () {
                         return [3 /*break*/, 5];
                     case 4:
                         error_1 = _a.sent();
-                        console.error("[TelegramService] Failed to save offset:", error_1);
+                        console.error("[TelegramChannel] Failed to save offset:", error_1);
                         return [3 /*break*/, 5];
                     case 5: return [2 /*return*/];
                 }
@@ -128,9 +255,9 @@ var TelegramService = /** @class */ (function () {
         });
     };
     /**
-     * Calculate backoff with jitter (mirrors clawdbot's approach)
+     * Calculate backoff with jitter
      */
-    TelegramService.prototype.calculateBackoff = function (currentAttempt) {
+    TelegramChannel.prototype.calculateBackoff = function (currentAttempt) {
         var baseBackoff = Math.min(INITIAL_BACKOFF_MS * Math.pow(BACKOFF_MULTIPLIER, currentAttempt), MAX_BACKOFF_MS);
         var jitter = baseBackoff * JITTER_PERCENT * (Math.random() * 2 - 1);
         return Math.max(INITIAL_BACKOFF_MS, baseBackoff + jitter);
@@ -138,7 +265,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Sleep for a specified duration
      */
-    TelegramService.prototype.sleep = function (ms) {
+    TelegramChannel.prototype.sleep = function (ms) {
         return __awaiter(this, void 0, void 0, function () {
             return __generator(this, function (_a) {
                 return [2 /*return*/, new Promise(function (resolve) { return setTimeout(resolve, ms); })];
@@ -148,7 +275,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Make a request to the Telegram Bot API
      */
-    TelegramService.prototype.apiRequest = function (method, params) {
+    TelegramChannel.prototype.apiRequest = function (method, params) {
         return __awaiter(this, void 0, void 0, function () {
             var url, response, errorText, data;
             return __generator(this, function (_a) {
@@ -171,7 +298,7 @@ var TelegramService = /** @class */ (function () {
                         throw new Error("Telegram API error: ".concat(response.status, " ").concat(errorText));
                     case 3: return [4 /*yield*/, response.json()];
                     case 4:
-                        data = _a.sent();
+                        data = (_a.sent());
                         if (!data.ok) {
                             throw new Error("Telegram API error: ".concat(data.description || "Unknown error"));
                         }
@@ -183,7 +310,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Get updates from Telegram (long polling)
      */
-    TelegramService.prototype.getUpdates = function () {
+    TelegramChannel.prototype.getUpdates = function () {
         return __awaiter(this, arguments, void 0, function (timeout) {
             var params, result, error_2;
             if (timeout === void 0) { timeout = POLL_TIMEOUT; }
@@ -213,7 +340,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Send a message to Telegram
      */
-    TelegramService.prototype.sendMessage = function (params) {
+    TelegramChannel.prototype.sendMessage = function (params) {
         return __awaiter(this, void 0, void 0, function () {
             var result;
             return __generator(this, function (_a) {
@@ -240,7 +367,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Send a text message to the allowed chat
      */
-    TelegramService.prototype.sendText = function (text, options) {
+    TelegramChannel.prototype.sendText = function (text, options) {
         return __awaiter(this, void 0, void 0, function () {
             var _a;
             return __generator(this, function (_b) {
@@ -257,7 +384,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Parse a command from a Telegram message
      */
-    TelegramService.prototype.parseCommand = function (message) {
+    TelegramChannel.prototype.parseCommand = function (message) {
         // Only process messages from allowed chat
         if (message.chat.id !== this.allowedChatId) {
             return null;
@@ -291,7 +418,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Start polling for updates (long polling)
      */
-    TelegramService.prototype.startPolling = function (options) {
+    TelegramChannel.prototype.startPolling = function (options) {
         return __awaiter(this, void 0, void 0, function () {
             var errorCount, updates, _i, updates_1, update, error_3, backoff;
             var _a;
@@ -303,13 +430,13 @@ var TelegramService = /** @class */ (function () {
                         }
                         this.isPolling = true;
                         errorCount = 0;
-                        console.log("[TelegramService] Starting long-polling loop");
+                        console.log("[TelegramChannel] Starting long-polling loop");
                         _b.label = 1;
                     case 1:
                         if (!this.isPolling) return [3 /*break*/, 12];
                         // Check for abort signal
                         if ((_a = options.signal) === null || _a === void 0 ? void 0 : _a.aborted) {
-                            console.log("[TelegramService] Polling aborted");
+                            console.log("[TelegramChannel] Polling aborted");
                             return [3 /*break*/, 12];
                         }
                         _b.label = 2;
@@ -348,7 +475,7 @@ var TelegramService = /** @class */ (function () {
                             options.onError(error_3 instanceof Error ? error_3 : new Error(String(error_3)));
                         }
                         backoff = this.calculateBackoff(errorCount);
-                        console.error("[TelegramService] Error polling (attempt ".concat(errorCount, "), retrying in ").concat(Math.round(backoff / 1000), "s:"), error_3);
+                        console.error("[TelegramChannel] Error polling (attempt ".concat(errorCount, "), retrying in ").concat(Math.round(backoff / 1000), "s:"), error_3);
                         return [4 /*yield*/, this.sleep(backoff)];
                     case 10:
                         _b.sent();
@@ -356,7 +483,7 @@ var TelegramService = /** @class */ (function () {
                     case 11: return [3 /*break*/, 1];
                     case 12:
                         this.isPolling = false;
-                        console.log("[TelegramService] Polling stopped");
+                        console.log("[TelegramChannel] Polling stopped");
                         return [2 /*return*/];
                 }
             });
@@ -365,14 +492,14 @@ var TelegramService = /** @class */ (function () {
     /**
      * Stop polling for updates
      */
-    TelegramService.prototype.stopPolling = function () {
+    TelegramChannel.prototype.stopPolling = function () {
         this.isPolling = false;
-        console.log("[TelegramService] Polling stop requested");
+        console.log("[TelegramChannel] Polling stop requested");
     };
     /**
      * Get the current polling state
      */
-    TelegramService.prototype.getPollingState = function () {
+    TelegramChannel.prototype.getPollingState = function () {
         return {
             isPolling: this.isPolling,
             offset: this.offset,
@@ -381,7 +508,7 @@ var TelegramService = /** @class */ (function () {
     /**
      * Test the Telegram bot connection
      */
-    TelegramService.prototype.testConnection = function () {
+    TelegramChannel.prototype.testConnection = function () {
         return __awaiter(this, void 0, void 0, function () {
             var result, error_4;
             return __generator(this, function (_a) {
@@ -411,6 +538,54 @@ var TelegramService = /** @class */ (function () {
             });
         });
     };
-    return TelegramService;
+    // ============================================================
+    // Message Normalization
+    // ============================================================
+    /**
+     * Create normalized ChannelMessage from Telegram message
+     */
+    TelegramChannel.prototype.createChannelMessage = function (msg) {
+        var _a, _b, _c, _d, _e, _f;
+        var sender = {
+            id: ((_b = (_a = msg.from) === null || _a === void 0 ? void 0 : _a.id) === null || _b === void 0 ? void 0 : _b.toString()) || msg.chat.id.toString(),
+            username: (_c = msg.from) === null || _c === void 0 ? void 0 : _c.username,
+            displayName: ((_d = msg.from) === null || _d === void 0 ? void 0 : _d.first_name) || ((_e = msg.from) === null || _e === void 0 ? void 0 : _e.username),
+            isBot: ((_f = msg.from) === null || _f === void 0 ? void 0 : _f.is_bot) || false,
+        };
+        var context = {
+            isDM: msg.chat.type === "private",
+            groupName: msg.chat.type !== "private" ? msg.chat.title : undefined,
+        };
+        return {
+            messageId: msg.message_id.toString(),
+            channelId: this.id,
+            timestamp: new Date(msg.date * 1000),
+            sender: sender,
+            text: msg.text || "",
+            context: context,
+            replyTo: msg.reply_to_message
+                ? {
+                    messageId: msg.reply_to_message.message_id.toString(),
+                    channelId: this.id,
+                }
+                : undefined,
+        };
+    };
+    return TelegramChannel;
 }());
-exports.TelegramService = TelegramService;
+exports.TelegramChannel = TelegramChannel;
+exports.TelegramService = TelegramChannel;
+/**
+ * Create Telegram channel config from environment
+ */
+function createTelegramConfigFromEnv() {
+    var token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token)
+        return null;
+    return {
+        platform: "telegram",
+        accountId: process.env.TELEGRAM_CHAT_ID || "default",
+        botToken: token,
+        allowedChatId: parseInt(process.env.TELEGRAM_CHAT_ID || "", 10),
+    };
+}

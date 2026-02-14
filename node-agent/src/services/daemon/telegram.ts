@@ -1,6 +1,9 @@
-// Telegram Bot API Client Service
-// Implements long-polling for inbound messages, sendMessage for outbound
-// Based on clawdbot's exponential backoff approach for error handling
+/**
+ * Telegram Channel Adapter for Node Agent
+ *
+ * Implements ChannelConnector from @ebowwa/channel-types.
+ * Adds specialized features: offset persistence, exponential backoff.
+ */
 
 import type {
   TelegramUpdate,
@@ -8,6 +11,17 @@ import type {
   TelegramSendMessageParams,
   PmCommand,
 } from "@ebowwa/codespaces-types/compile";
+import {
+  type ChannelConnector,
+  type ChannelId,
+  type ChannelMessage,
+  type ChannelResponse,
+  type ChannelCapabilities,
+  type MessageHandler,
+  type MessageSender,
+  type MessageContext,
+  createChannelId,
+} from "@ebowwa/channel-types";
 
 // Configuration
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
@@ -28,13 +42,45 @@ export interface TelegramPollOptions {
   signal?: AbortSignal;
 }
 
-export class TelegramService {
+/**
+ * TelegramChannel - Implements ChannelConnector for Node Agent
+ *
+ * Features:
+ * - Long polling with exponential backoff
+ * - Offset persistence for crash recovery
+ * - Normalized ChannelMessage format
+ */
+export class TelegramChannel implements ChannelConnector {
+  readonly id: ChannelId;
+  readonly label = "Telegram (Node Agent)";
+  readonly capabilities: ChannelCapabilities = {
+    supports: {
+      text: true,
+      media: true,
+      replies: true,
+      threads: false,
+      reactions: false,
+      editing: true,
+      streaming: false,
+    },
+    media: {
+      maxFileSize: 50 * 1024 * 1024, // 50MB
+      supportedMimeTypes: ["image/*", "video/*", "audio/*", "application/pdf"],
+    },
+    rateLimits: {
+      messagesPerMinute: 30,
+      charactersPerMessage: 4096,
+    },
+  };
+
   private token: string;
   private allowedChatId: number;
   private apiUrl: string;
   private offset: number = 0;
   private isPolling: boolean = false;
   private currentBackoff: number = INITIAL_BACKOFF_MS;
+  private connected: boolean = false;
+  private messageHandler?: MessageHandler;
 
   constructor() {
     if (!TELEGRAM_BOT_TOKEN) {
@@ -47,10 +93,76 @@ export class TelegramService {
     this.token = TELEGRAM_BOT_TOKEN;
     this.allowedChatId = TELEGRAM_CHAT_ID;
     this.apiUrl = TELEGRAM_API_URL;
+    this.id = createChannelId("telegram", TELEGRAM_CHAT_ID.toString());
 
     // Load offset from file if exists
     this.loadOffset();
   }
+
+  // ============================================================
+  // ChannelConnector Interface Implementation
+  // ============================================================
+
+  /**
+   * Start the channel (begin polling)
+   */
+  async start(): Promise<void> {
+    await this.startPolling({
+      onUpdate: async (update: TelegramUpdate) => {
+        if (update.message && this.messageHandler) {
+          const channelMessage = this.createChannelMessage(update.message);
+          await this.messageHandler(channelMessage);
+        }
+      },
+      onError: (error: Error) => {
+        console.error("[TelegramChannel] Polling error:", error);
+      },
+    });
+    this.connected = true;
+  }
+
+  /**
+   * Stop the channel
+   */
+  async stop(): Promise<void> {
+    this.stopPolling();
+    this.connected = false;
+  }
+
+  /**
+   * Register message handler
+   */
+  onMessage(handler: MessageHandler): void {
+    this.messageHandler = handler;
+  }
+
+  /**
+   * Send response to Telegram
+   */
+  async send(response: ChannelResponse): Promise<void> {
+    const chatId = parseInt(response.replyTo.channelId.accountId, 10);
+    if (isNaN(chatId)) {
+      console.error("[TelegramChannel] Invalid chat ID in response");
+      return;
+    }
+
+    await this.sendText(response.content.text, {
+      reply_to_message_id: response.content.replyToOriginal
+        ? parseInt(response.replyTo.messageId, 10)
+        : undefined,
+    });
+  }
+
+  /**
+   * Check if connected
+   */
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  // ============================================================
+  // Telegram-Specific Implementation
+  // ============================================================
 
   /**
    * Load the last processed update_id from disk
@@ -60,7 +172,7 @@ export class TelegramService {
       const { promises: fsp } = await import("fs");
       const offsetData = await fsp.readFile(OFFSET_FILE_PATH, "utf-8");
       this.offset = parseInt(offsetData.trim(), 10);
-      console.log(`[TelegramService] Loaded offset: ${this.offset}`);
+      console.log(`[TelegramChannel] Loaded offset: ${this.offset}`);
     } catch {
       // File doesn't exist or is invalid, start from 0
       this.offset = 0;
@@ -77,12 +189,12 @@ export class TelegramService {
       await fsp.mkdir(`${homeDir}/.node-agent`, { recursive: true });
       await fsp.writeFile(OFFSET_FILE_PATH, this.offset.toString(), "utf-8");
     } catch (error) {
-      console.error("[TelegramService] Failed to save offset:", error);
+      console.error("[TelegramChannel] Failed to save offset:", error);
     }
   }
 
   /**
-   * Calculate backoff with jitter (mirrors clawdbot's approach)
+   * Calculate backoff with jitter
    */
   private calculateBackoff(currentAttempt: number): number {
     const baseBackoff = Math.min(
@@ -118,7 +230,7 @@ export class TelegramService {
       throw new Error(`Telegram API error: ${response.status} ${errorText}`);
     }
 
-    const data = await response.json() as { ok: boolean; result: T; description?: string };
+    const data = (await response.json()) as { ok: boolean; result: T; description?: string };
 
     if (!data.ok) {
       throw new Error(`Telegram API error: ${data.description || "Unknown error"}`);
@@ -156,16 +268,13 @@ export class TelegramService {
       throw new Error(`Chat ID ${params.chat_id} is not in the allowlist`);
     }
 
-    const result = await this.apiRequest<{ message: TelegramMessage }>(
-      "sendMessage",
-      {
-        chat_id: params.chat_id,
-        text: params.text,
-        parse_mode: params.parse_mode,
-        disable_web_page_preview: params.disable_web_page_preview,
-        reply_to_message_id: params.reply_to_message_id,
-      }
-    );
+    const result = await this.apiRequest<{ message: TelegramMessage }>("sendMessage", {
+      chat_id: params.chat_id,
+      text: params.text,
+      parse_mode: params.parse_mode,
+      disable_web_page_preview: params.disable_web_page_preview,
+      reply_to_message_id: params.reply_to_message_id,
+    });
 
     return result as unknown as TelegramMessage;
   }
@@ -173,7 +282,10 @@ export class TelegramService {
   /**
    * Send a text message to the allowed chat
    */
-  async sendText(text: string, options?: Partial<TelegramSendMessageParams>): Promise<TelegramMessage> {
+  async sendText(
+    text: string,
+    options?: Partial<TelegramSendMessageParams>
+  ): Promise<TelegramMessage> {
     return this.sendMessage({
       chat_id: this.allowedChatId,
       text,
@@ -233,12 +345,12 @@ export class TelegramService {
     this.isPolling = true;
     let errorCount = 0;
 
-    console.log("[TelegramService] Starting long-polling loop");
+    console.log("[TelegramChannel] Starting long-polling loop");
 
     while (this.isPolling) {
       // Check for abort signal
       if (options.signal?.aborted) {
-        console.log("[TelegramService] Polling aborted");
+        console.log("[TelegramChannel] Polling aborted");
         break;
       }
 
@@ -267,7 +379,7 @@ export class TelegramService {
         // Exponential backoff with jitter
         const backoff = this.calculateBackoff(errorCount);
         console.error(
-          `[TelegramService] Error polling (attempt ${errorCount}), retrying in ${Math.round(backoff / 1000)}s:`,
+          `[TelegramChannel] Error polling (attempt ${errorCount}), retrying in ${Math.round(backoff / 1000)}s:`,
           error
         );
 
@@ -276,7 +388,7 @@ export class TelegramService {
     }
 
     this.isPolling = false;
-    console.log("[TelegramService] Polling stopped");
+    console.log("[TelegramChannel] Polling stopped");
   }
 
   /**
@@ -284,7 +396,7 @@ export class TelegramService {
    */
   stopPolling(): void {
     this.isPolling = false;
-    console.log("[TelegramService] Polling stop requested");
+    console.log("[TelegramChannel] Polling stop requested");
   }
 
   /**
@@ -300,9 +412,15 @@ export class TelegramService {
   /**
    * Test the Telegram bot connection
    */
-  async testConnection(): Promise<{ ok: boolean; bot: { id: number; name: string; username: string } | null; error?: string }> {
+  async testConnection(): Promise<{
+    ok: boolean;
+    bot: { id: number; name: string; username: string } | null;
+    error?: string;
+  }> {
     try {
-      const result = await this.apiRequest<{ id: number; first_name: string; username: string }>("getMe");
+      const result = await this.apiRequest<{ id: number; first_name: string; username: string }>(
+        "getMe"
+      );
       return {
         ok: true,
         bot: {
@@ -319,4 +437,58 @@ export class TelegramService {
       };
     }
   }
+
+  // ============================================================
+  // Message Normalization
+  // ============================================================
+
+  /**
+   * Create normalized ChannelMessage from Telegram message
+   */
+  private createChannelMessage(msg: TelegramMessage): ChannelMessage {
+    const sender: MessageSender = {
+      id: msg.from?.id?.toString() || msg.chat.id.toString(),
+      username: msg.from?.username,
+      displayName: msg.from?.first_name || msg.from?.username,
+      isBot: msg.from?.is_bot || false,
+    };
+
+    const context: MessageContext = {
+      isDM: msg.chat.type === "private",
+      groupName: msg.chat.type !== "private" ? msg.chat.title : undefined,
+    };
+
+    return {
+      messageId: msg.message_id.toString(),
+      channelId: this.id,
+      timestamp: new Date(msg.date * 1000),
+      sender,
+      text: msg.text || "",
+      context,
+      replyTo: msg.reply_to_message
+        ? {
+            messageId: msg.reply_to_message.message_id.toString(),
+            channelId: this.id,
+          }
+        : undefined,
+    };
+  }
+}
+
+// Legacy export for backwards compatibility
+export { TelegramChannel as TelegramService };
+
+/**
+ * Create Telegram channel config from environment
+ */
+export function createTelegramConfigFromEnv() {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+
+  return {
+    platform: "telegram" as const,
+    accountId: process.env.TELEGRAM_CHAT_ID || "default",
+    botToken: token,
+    allowedChatId: parseInt(process.env.TELEGRAM_CHAT_ID || "", 10),
+  };
 }

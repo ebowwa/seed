@@ -2,17 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "env": {
     "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-    "ANTHROPIC_MODEL": "glm-4.7",
-    "ANTHROPIC_SMALL_FAST_MODEL": "glm-4.6"
+    "ANTHROPIC_MODEL": "glm-5",
+    "ANTHROPIC_SMALL_FAST_MODEL": "glm-4.7"
   },
   "mcpServers": {
     "zai-mcp-server": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "@z_ai/mcp-server"
-      ],
+      "args": ["-y", "@z_ai/mcp-server"],
       "env": {
         "Z_AI_API_KEY": "${Z_AI_API_KEY}",
         "Z_AI_MODE": "ZAI"

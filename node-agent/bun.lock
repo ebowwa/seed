@@ -5,6 +5,7 @@
     "": {
       "name": "seed-node-agent",
       "dependencies": {
+        "@ebowwa/channel-types": "^0.1.1",
         "@ebowwa/rolling-keys": "^0.1.1",
       },
       "devDependencies": {
@@ -13,6 +14,8 @@
     },
   },
   "packages": {
+    "@ebowwa/channel-types": ["@ebowwa/channel-types@0.1.1", "", {}, "sha512-NMuKzpNo0HLQjoG3EXQ1undFQyOoPG3gvKH/k5jI6W/y+vCkpK9kVQ6DpPc0w0A7lfVqcvmK91eVk5YsR61hUA=="],
+
     "@ebowwa/rolling-keys": ["@ebowwa/rolling-keys@0.1.1", "", { "dependencies": { "zod": "^3.24.0" } }, "sha512-zfTwnV+u1gD9SvH7dWNg0+1htrO2WyeF3GEznf8UQf4OH6m72gTOrMbZITZ36sTuLIlmGfSmx+lTDd6VmTqeJQ=="],
 
     "@types/bun": ["@types/bun@1.3.6", "", { "dependencies": { "bun-types": "1.3.6" } }, "sha512-uWCv6FO/8LcpREhenN1d1b6fcspAB+cefwD7uti8C8VffIv0Um08TKMn98FynpTiU38+y2dUO55T11NgDt8VAA=="],
