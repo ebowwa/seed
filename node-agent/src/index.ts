@@ -1345,45 +1345,38 @@ Time: ${new Date().toISOString()}
     const recentEvents: MonitorEvent[] = [];
     const MAX_RECENT_EVENTS = 10;
 
-    // Start Telegram polling loop
-    console.log("[PM Daemon] Starting Telegram polling loop...");
-    const telegramAbortController = new AbortController();
+    // Start Telegram channel with message handler
+    console.log("[PM Daemon] Starting Telegram channel...");
 
-    telegramService.startPolling({
-      signal: telegramAbortController.signal,
-      onUpdate: async (update) => {
-        if (!update.message) {
-          return;
-        }
+    telegramService.onMessage(async (message) => {
+      const command = telegramService.parseCommand(message);
+      if (!command) {
+        return null;
+      }
 
-        const command = telegramService.parseCommand(update.message);
-        if (!command) {
-          return;
-        }
+      console.log(`[PM Daemon] Received command: /${command.command}`);
 
-        console.log(`[PM Daemon] Received command: /${command.command}`);
-
-        // Handle slash commands
-        if (command.command !== "chat") {
-          const response = await pmCommands.executeCommand(command);
-          await telegramService.sendText(response.text, {
-            parse_mode: response.parse_mode,
-            reply_to_message_id: response.reply_to_message_id,
-          });
-          return;
-        }
-
-        // Chat messages go to Daemon Layer Agent
-        const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
-          events: recentEvents.slice(-5),
+      // Handle slash commands
+      if (command.command !== "chat") {
+        const response = await pmCommands.executeCommand(command);
+        await telegramService.sendText(response.text, {
+          parse_mode: response.parse_mode,
+          reply_to_message_id: response.reply_to_message_id,
         });
+        return null;
+      }
 
-        await telegramService.sendText(agentResponse.text);
-      },
-      onError: (error) => {
-        console.error("[PM Daemon] Telegram polling error:", error);
-      },
+      // Chat messages go to Daemon Layer Agent
+      const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
+        events: recentEvents.slice(-5),
+      });
+
+      await telegramService.sendText(agentResponse.text);
+      return null;
     });
+
+    await telegramService.start();
+    console.log("[PM Daemon] ✓ Telegram channel started");
 
     // Start monitor loop
     console.log("[PM Daemon] Starting monitor loop...");
@@ -1457,9 +1450,8 @@ ${event.node_id}: ${warnings.join(", ")}
     // Graceful shutdown
     const shutdown = async () => {
       console.log("[PM Daemon] Shutting down...");
-      telegramAbortController.abort();
       monitorAbortController.abort();
-      telegramService.stopPolling();
+      await telegramService.stop();
       pmMonitor.stopMonitoring();
 
       // Stop Daemon Layer Agent session
