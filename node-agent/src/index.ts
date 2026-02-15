@@ -1367,11 +1367,20 @@ Time: ${new Date().toISOString()}
       }
 
       // Chat messages go to Daemon Layer Agent
-      const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
-        events: recentEvents.slice(-5),
-      });
+      // Start typing indicator before GLM processing
+      telegramService.startTyping();
 
-      await telegramService.sendText(agentResponse.text);
+      try {
+        const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
+          events: recentEvents.slice(-5),
+        });
+
+        await telegramService.sendText(agentResponse.text);
+      } finally {
+        // Always stop typing indicator, even on error
+        telegramService.stopTyping();
+      }
+
       return null;
     });
 

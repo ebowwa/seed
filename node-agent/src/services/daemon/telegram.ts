@@ -163,6 +163,26 @@ export class PmTelegramChannel implements ChannelConnector {
   }
 
   /**
+   * Start typing indicator
+   */
+  startTyping(): void {
+    const chatId = this.config.allowedChatId;
+    if (chatId) {
+      this.baseChannel.startTypingIndicator(chatId);
+    }
+  }
+
+  /**
+   * Stop typing indicator
+   */
+  stopTyping(): void {
+    const chatId = this.config.allowedChatId;
+    if (chatId) {
+      this.baseChannel.stopTypingIndicator(chatId);
+    }
+  }
+
+  /**
    * Send text message to the allowed chat
    */
   async sendText(

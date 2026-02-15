@@ -21,7 +21,9 @@
 // ============================================================================
 
 import { GLMAgent, ConversationMemory, BUILTIN_TOOLS, ToolExecutor } from "@ebowwa/glm-daemon";
+import { GLMClient } from "@ebowwa/ai";
 import type { PmBrainResponse, MonitorEvent } from "../../types/index";
+import type { ChatMessage } from "@ebowwa/codespaces-types/runtime/ai";
 
 // PM Daemon system prompt
 const PM_DAEMON_PROMPT = `You are the PM (Project Manager) Daemon — a 24/7 AI project manager overseeing Ralph loops (autonomous AI developer agents) on this node.
@@ -82,7 +84,9 @@ export interface PmBrainConfig {
  * Main service for managing PM daemon's AI brain using GLM
  */
 export class DaemonLayerAgentService {
-  private agent: GLMAgent;
+  private agent!: GLMAgent;
+  private glmClient!: GLMClient;
+  private toolExecutor: ToolExecutor;
   private memory: ConversationMemory;
   private config: Required<PmBrainConfig>;
   private isProcessing: boolean = false;
@@ -96,14 +100,6 @@ export class DaemonLayerAgentService {
 
     // Initialize conversation memory
     this.memory = new ConversationMemory({ maxMessages: 50 });
-
-    // Initialize GLM agent with PM daemon prompt
-    this.agent = new GLMAgent({
-      prompt: PM_DAEMON_PROMPT,
-      model: this.config.model,
-      temperature: this.config.temperature,
-      maxTokens: this.config.maxTokens,
-    });
   }
 
   /**
@@ -111,6 +107,23 @@ export class DaemonLayerAgentService {
    */
   async start(): Promise<void> {
     console.log("[PmBrain] Starting GLM agent session...");
+
+    // Initialize GLM client
+    this.glmClient = new GLMClient();
+
+    // Initialize ToolExecutor with built-in tools
+    this.toolExecutor = new ToolExecutor(this.glmClient, BUILTIN_TOOLS);
+
+    // Initialize GLM agent with tools
+    this.agent = new GLMAgent({
+      prompt: PM_DAEMON_PROMPT,
+      model: this.config.model,
+      temperature: this.config.temperature,
+      maxTokens: this.config.maxTokens,
+      tools: BUILTIN_TOOLS,
+      toolExecutor: this.toolExecutor,
+    });
+
     console.log("[PmBrain] ✓ PM brain ready");
   }
 
@@ -203,6 +216,8 @@ export class DaemonLayerAgentService {
       model: this.config.model,
       temperature: this.config.temperature,
       maxTokens: this.config.maxTokens,
+      tools: BUILTIN_TOOLS,
+      toolExecutor: this.toolExecutor,
     });
 
     return await worker.execute(prompt);
