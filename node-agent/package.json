@@ -43,7 +43,10 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@ebowwa/ai": "^0.2.0",
+    "@ebowwa/channel-telegram": "^1.13.5",
     "@ebowwa/channel-types": "^0.1.1",
+    "@ebowwa/glm-daemon": "^0.4.4",
     "@ebowwa/rolling-keys": "^0.1.1"
   },
   "devDependencies": {
