@@ -88,6 +88,8 @@ export class PmTelegramChannel implements ChannelConnector {
   private config: PmTelegramConfig;
   private connected = false;
   private messageHandler?: MessageHandler;
+  private _legacyOnUpdate?: (update: any) => Promise<void>;
+  private _legacyOnError?: (error: Error) => void;
 
   constructor(config?: PmTelegramConfig) {
     // Allow no-arg constructor for backwards compatibility
@@ -142,6 +144,64 @@ export class PmTelegramChannel implements ChannelConnector {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  // ============================================================
+  // Legacy API (backwards compatibility)
+  // ============================================================
+
+  /**
+   * Legacy startPolling - bridges old API to new ChannelConnector pattern
+   */
+  async startPolling(options: {
+    signal?: AbortSignal;
+    onUpdate: (update: any) => Promise<void>;
+    onError?: (error: Error) => void;
+  }): Promise<void> {
+    // Store callbacks for legacy compatibility
+    this._legacyOnUpdate = options.onUpdate;
+    this._legacyOnError = options.onError;
+
+    // Set up message handler that converts ChannelMessage to legacy format
+    this.onMessage(async (message) => {
+      try {
+        // Convert ChannelMessage to legacy update format
+        const legacyUpdate = {
+          message: {
+            message_id: parseInt(message.messageId, 10),
+            from: {
+              id: parseInt(message.sender.id, 10),
+              first_name: message.sender.displayName || message.sender.username || "User",
+            },
+            chat: {
+              id: parseInt(message.channelId.accountId, 10),
+              type: "private" as const,
+            },
+            text: message.text || "",
+            date: Math.floor(message.timestamp.getTime() / 1000),
+          }
+        };
+
+        if (options.onUpdate) {
+          await options.onUpdate(legacyUpdate);
+        }
+      } catch (error) {
+        if (options.onError) {
+          options.onError(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+      return null;
+    });
+
+    // Start the channel
+    await this.start();
+  }
+
+  /**
+   * Legacy stopPolling
+   */
+  async stopPolling(): Promise<void> {
+    await this.stop();
   }
 
   // ============================================================
