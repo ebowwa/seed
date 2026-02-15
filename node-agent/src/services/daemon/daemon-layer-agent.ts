@@ -2,261 +2,76 @@
 // DaemonLayerAgentService - PM Daemon AI Brain
 // ============================================================================
 //
-// PURPOSE: Manages persistent Claude Code sessions for the Project Manager daemon
+// PURPOSE: Manages GLM-powered AI brain for the Project Manager daemon
 //
 // ARCHITECTURE:
 //   ┌─────────────────────────────────────────────────────────────┐
 //   │                    DaemonLayerAgentService                   │
 //   │  ┌──────────────────────────────────────────────────────┐  │
-//   │  │         PersistentClaudeSession                       │  │
-//   │  │  • Long-running Claude Code process via doppler       │  │
-//   │  │  • stdin/stdout communication pipe                    │  │
-//   │  │  • Auto-restart on crash                              │  │
-//   │  │  • Memory/context handled by Claude                  │  │
+//   │  │              GLMAgent (@ebowwa/glm-daemon)            │  │
+//   │  │  • GLM 4.7 API with tool execution                   │  │
+//   │  │  • Conversation memory for context                   │  │
+//   │  │  • Built-in tools via @ebowwa/ai                     │  │
 //   │  └──────────────────────────────────────────────────────┘  │
 //   │                                                             │
-//   │  • spawnWorker() - One-off Claude sessions                │
-//   │  • spawnWorkers() - Parallel workers                      │
+//   │  • processMessage() - Handle Telegram messages with GLM   │
+//   │  • spawnWorker() - One-off GLM queries                    │
 //   └─────────────────────────────────────────────────────────────┘
-//
-// INTEGRATION POINTS for @ebowwa/tooling:
-//   1. start() - Run tooling.sync() on startup to ensure repos are current
-//   2. processMessage() - Check tooling.status() for context before processing
-//   3. spawnWorker() - Validate tooling state before spawning workers
-//   4. Add new methods: syncRepos(), validateRepos(), getRepoStatus()
-//
-// CONFIGURATION:
-//   - dopplerProject: Doppler project name (default: "seed")
-//   - dopplerConfig: Doppler config (default: "prd")
-//   - cwd: Working directory for Claude sessions
-//
-// TODO: Add tooling integration
-//   - import { ToolingService } from "@ebowwa/tooling"
-//   - Call tooling.sync() during start()
-//   - Expose tooling status via API
 //
 // ============================================================================
 
-import { spawn } from "child_process";
-import path from "path";
-import type {
-  PmBrainResponse,
-  MonitorEvent,
-} from "../../types/index";
+import { GLMAgent, ConversationMemory, BUILTIN_TOOLS, ToolExecutor } from "@ebowwa/glm-daemon";
+import type { PmBrainResponse, MonitorEvent } from "../../types/index";
 
-const SPAWN_TIMEOUT_MS = 120000; // 2 minutes for spawned sessions
+// PM Daemon system prompt
+const PM_DAEMON_PROMPT = `You are the PM (Project Manager) Daemon — a 24/7 AI project manager overseeing Ralph loops (autonomous AI developer agents) on this node.
+
+## Your Role
+
+You manage a **single node** (this VPS instance):
+- **Ralph loops** (autonomous AI agents that iterate on tasks)
+- **Git worktrees** (isolated development environments)
+- **Resource monitoring** (CPU, memory, disk usage)
+
+## Your Personality
+
+- **Proactive**: Report issues before being asked
+- **Concise**: Telegram messages, not essays
+- **Opinionated**: If something looks wrong, say so
+- **Responsible**: Enforce constraints (one loop per worktree, resource limits)
+
+## Your Constraints
+
+- **One Ralph loop per worktree** (hard constraint — state file conflicts)
+- Respect resource limits (don't overload the node)
+- Ask before taking autonomous actions unless explicitly told otherwise
+
+## Communication
+
+The operator messages you via Telegram. Be helpful but brief. The operator is technical and values directness.
+
+If you detect a problem (stalled Ralph, resource exhaustion, errors), proactively notify the operator with context and suggested actions.
+
+## Example Responses
+
+**Good**:
+\`\`\`
+The "auth-fix" Ralph has been stuck at iteration 7 for 10 minutes. CPU is at 45%, memory at 62%. Should I restart it?
+\`\`\`
+
+**Bad** (too verbose):
+\`\`\`
+I have detected that the Ralph loop named "auth-fix" which is running on this node has not made progress in the last 10 minutes and remains at iteration 7. Would you like me to restart this loop?
+\`\`\``;
 
 // ============================================================================
 // Configuration
 // ============================================================================
 
 export interface PmBrainConfig {
-  dopplerProject?: string;
-  dopplerConfig?: string;
-  cwd?: string;
-}
-
-// ============================================================================
-// PersistentClaudeSession
-// ============================================================================
-/**
- * Manages a single persistent Claude Code process with stdin/stdout communication
- * 
- * This class maintains a long-running Claude Code session that:
- * - Survives multiple requests (memory/context preserved)
- * - Auto-restarts on crashes
- * - Communicates via stdin/stdout pipes
- * - Handles timeout and graceful shutdown
- */
-class PersistentClaudeSession {
-  private process: ReturnType<typeof spawn> | null = null;
-  private config: { dopplerProject: string; dopplerConfig: string; cwd: string };
-  private stdoutBuffer: string = "";
-  private isReady: boolean = false;
-  private isShutdown: boolean = false;
-  private pendingResolver: ((value: string) => void) | null = null;
-
-  constructor(config: { dopplerProject: string; dopplerConfig: string; cwd: string }) {
-    this.config = config;
-  }
-
-  /**
-   * Start the persistent Claude Code process
-   * 
-   * Spawns: doppler run --project <proj> --config <cfg> -- claude
-   * - Uses doppler to inject secrets
-   * - Pipes stdin/stdout/stderr
-   * - Sets up auto-restart on crash
-   */
-  async start(): Promise<void> {
-    if (this.process) {
-      throw new Error("Persistent session already running");
-    }
-
-    console.log("[PmBrain] Starting persistent Claude Code session with rolling keys supervisor...");
-
-    // Get the path to the rolling-keys-supervisor.ts
-    const supervisorPath = path.join(
-      path.dirname(import.meta.url.replace("file://", "")),
-      "..",
-      "lib",
-      "rolling-keys-supervisor.ts"
-    );
-
-    // Spawn with rolling keys supervisor
-    // Use -- to separate doppler args from the claude command
-    const args = [
-      "run",
-      "--project",
-      this.config.dopplerProject,
-      "--config",
-      this.config.dopplerConfig,
-      "--",
-      "bun",
-      "run",
-      supervisorPath,
-    ];
-
-    this.process = spawn("doppler", args, {
-      cwd: this.config.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    // Handle stdout - collect output until we have a complete response
-    this.process.stdout?.on("data", (data) => {
-      this.stdoutBuffer += data.toString();
-
-      // Check if we have a complete response (heuristic: empty line + output)
-      if (this.pendingResolver && this.isResponseComplete(this.stdoutBuffer)) {
-        const response = this.extractResponse(this.stdoutBuffer);
-        this.pendingResolver(response);
-        this.pendingResolver = null;
-        this.stdoutBuffer = "";
-      }
-    });
-
-    // Handle stderr (log it but don't crash)
-    this.process.stderr?.on("data", (data) => {
-      console.error("[Claude]", data.toString());
-    });
-
-    // Handle process exit - auto-restart if it crashes
-    this.process.on("close", (code) => {
-      console.log(`[PmBrain] Claude Code exited (code: ${code})`);
-
-      if (!this.isShutdown) {
-        console.log("[PmBrain] Restarting in 5 seconds...");
-        setTimeout(() => this.start(), 5000);
-      }
-
-      this.process = null;
-      this.isReady = false;
-    });
-
-    // Handle process error
-    this.process.on("error", (error) => {
-      console.error("[PmBrain] Claude Code error:", error);
-    });
-
-    // Wait for process to be ready (2 second timeout or first stdout)
-    await new Promise<void>((resolve) => {
-      const timeout = setTimeout(() => {
-        this.isReady = true;
-        resolve();
-      }, 2000);
-
-      this.process?.stdout?.once("data", () => {
-        clearTimeout(timeout);
-        this.isReady = true;
-        resolve();
-      });
-    });
-
-    console.log("[PmBrain] ✓ Claude Code session running");
-  }
-
-  /**
-   * Check if response appears complete
-   * Heuristic: empty line + substantial output
-   */
-  private isResponseComplete(output: string): boolean {
-    return output.includes("\n\n") && output.length > 50;
-  }
-
-  /**
-   * Extract Claude's response from buffer
-   * Removes ANSI escape codes for clean output
-   */
-  private extractResponse(buffer: string): string {
-    const ansiRegex = /\x1b\[[0-9;]*m/g;
-    let cleaned = buffer.replace(ansiRegex, "");
-    return cleaned.trim();
-  }
-
-  /**
-   * Send a message to Claude and wait for response
-   * 
-   * INTEGRATION POINT: Could inject tooling status here for context
-   */
-  async sendMessage(message: string): Promise<string> {
-    if (!this.process || !this.isReady) {
-      throw new Error("Claude Code not ready");
-    }
-
-    console.log(`[PmBrain] → ${message.substring(0, 100)}${message.length > 100 ? "..." : ""}`);
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        // Timeout - return whatever we have
-        const response = this.extractResponse(this.stdoutBuffer);
-        this.pendingResolver = null;
-        this.stdoutBuffer = "";
-        resolve(response || "No response (timeout)");
-      }, 60000); // 60 second timeout
-
-      this.pendingResolver = (response: string) => {
-        clearTimeout(timeout);
-        console.log(`[PmBrain] ← ${response.substring(0, 100)}${response.length > 100 ? "..." : ""}`);
-        resolve(response);
-      };
-
-      // Write to stdin
-      this.process?.stdin.write(message + "\n");
-    });
-  }
-
-  /**
-   * Shutdown the persistent session
-   * Attempts graceful SIGTERM, then SIGKILL after 5 seconds
-   */
-  async shutdown(): Promise<void> {
-    this.isShutdown = true;
-
-    if (this.process) {
-      console.log("[PmBrain] Shutting down Claude Code...");
-      this.process.kill("SIGTERM");
-
-      // Wait up to 5 seconds for graceful shutdown
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          this.process?.kill("SIGKILL");
-          resolve();
-        }, 5000);
-
-        this.process?.once("close", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-      });
-    }
-  }
-
-  /**
-   * Check if process is running
-   */
-  isRunning(): boolean {
-    return this.process !== null && this.isReady;
-  }
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 // ============================================================================
@@ -264,56 +79,38 @@ class PersistentClaudeSession {
 // ============================================================================
 
 /**
- * Main service for managing PM daemon's AI brain
- * 
- * RESPONSIBILITIES:
- * - Maintains persistent Claude Code session for context/memory
- * - Spawns one-off worker sessions for parallel tasks
- * - Processes incoming messages with monitor event context
- * 
- * INTEGRATION: Add tooling methods here (syncRepos, getRepoStatus, etc.)
+ * Main service for managing PM daemon's AI brain using GLM
  */
 export class DaemonLayerAgentService {
+  private agent: GLMAgent;
+  private memory: ConversationMemory;
   private config: Required<PmBrainConfig>;
-  private persistentSession: PersistentClaudeSession | null = null;
   private isProcessing: boolean = false;
-
-  // TODO: Add tooling service
-  // private tooling?: ToolingService;
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
-      dopplerProject: config.dopplerProject || process.env.DOPPLER_PROJECT || "seed",
-      dopplerConfig: config.dopplerConfig || process.env.DOPPLER_CONFIG || "prd",
-      cwd: config.cwd || process.cwd(),
+      model: config.model || "glm-4.7",
+      temperature: config.temperature || 0.7,
+      maxTokens: config.maxTokens || 4096,
     };
+
+    // Initialize conversation memory
+    this.memory = new ConversationMemory({ maxLength: 50 });
+
+    // Initialize GLM agent with PM daemon prompt
+    this.agent = new GLMAgent({
+      prompt: PM_DAEMON_PROMPT,
+      model: this.config.model,
+      temperature: this.config.temperature,
+      maxTokens: this.config.maxTokens,
+    });
   }
 
   /**
-   * Start the PM brain with persistent Claude Code session
-   * 
-   * INTEGRATION POINT: Call tooling.sync() here to ensure repos are current
-   * TODO: 
-   *   - Initialize tooling service
-   *   - Run await this.tooling.sync() on startup
+   * Start the PM brain
    */
   async start(): Promise<void> {
-    if (this.persistentSession) {
-      console.warn("[PmBrain] Already started");
-      return;
-    }
-
-    // TODO: Initialize and sync tooling
-    // this.tooling = new ToolingService();
-    // await this.tooling.sync();
-
-    this.persistentSession = new PersistentClaudeSession({
-      dopplerProject: this.config.dopplerProject,
-      dopplerConfig: this.config.dopplerConfig,
-      cwd: this.config.cwd,
-    });
-
-    await this.persistentSession.start();
+    console.log("[PmBrain] Starting GLM agent session...");
     console.log("[PmBrain] ✓ PM brain ready");
   }
 
@@ -321,12 +118,6 @@ export class DaemonLayerAgentService {
    * Stop the PM brain
    */
   async stop(): Promise<void> {
-    if (!this.persistentSession) {
-      return;
-    }
-
-    await this.persistentSession.shutdown();
-    this.persistentSession = null;
     console.log("[PmBrain] PM brain stopped");
   }
 
@@ -334,17 +125,11 @@ export class DaemonLayerAgentService {
    * Check if brain is running
    */
   isRunning(): boolean {
-    return this.persistentSession?.isRunning() ?? false;
+    return true; // GLM agent is always ready
   }
 
   /**
-   * Process a message through the persistent session
-   * Claude Code handles all memory and context
-   * 
-   * INTEGRATION POINT: Could inject tooling status into context
-   * TODO:
-   *   - Check tooling.status() for repo state
-   *   - Inject dirty/uncommitted states into context
+   * Process a message through GLM agent
    */
   async processMessage(
     message: string,
@@ -352,10 +137,6 @@ export class DaemonLayerAgentService {
       events?: MonitorEvent[];
     }
   ): Promise<PmBrainResponse> {
-    if (!this.persistentSession) {
-      throw new Error("PM brain not started. Call start() first.");
-    }
-
     if (this.isProcessing) {
       return {
         text: "Busy processing previous message. Try again in a moment.",
@@ -368,16 +149,16 @@ export class DaemonLayerAgentService {
       // Inject context into the message if provided
       let fullMessage = message;
 
-      if (context?.events) {
+      if (context?.events && context.events.length > 0) {
         fullMessage = this.injectContext(message, context.events);
       }
 
-      // TODO: Could inject tooling status here
-      // const repoStatus = await this.tooling?.getStatus();
-      // fullMessage += `\n\nRepo Status:\n${JSON.stringify(repoStatus, null, 2)}`;
+      // Execute via GLM agent
+      const responseText = await this.agent.execute(fullMessage);
 
-      // Send to persistent Claude process
-      const responseText = await this.persistentSession.sendMessage(fullMessage);
+      // Store in memory for context
+      this.memory.addMessage("user", message);
+      this.memory.addMessage("assistant", responseText);
 
       return {
         text: responseText,
@@ -396,10 +177,6 @@ export class DaemonLayerAgentService {
    * Inject context into message (for monitor events)
    */
   private injectContext(message: string, events: MonitorEvent[]): string {
-    if (events.length === 0) {
-      return message;
-    }
-
     const parts: string[] = [];
 
     // Add events if provided
@@ -416,79 +193,19 @@ export class DaemonLayerAgentService {
   }
 
   /**
-   * Spawn a fresh Claude Code session for a one-off task
-   * Returns response without affecting persistent session
-   * 
-   * INTEGRATION POINT: Validate tooling state before spawning
-   * TODO: Check tooling.validate() before running workers
+   * Spawn a one-off GLM query (no memory persistence)
    */
   async spawnWorker(prompt: string): Promise<string> {
-    console.log("[PmBrain] Spawning worker Claude...");
+    console.log("[PmBrain] Spawning GLM worker...");
 
-    // TODO: Validate environment before spawning
-    // const isValid = await this.tooling?.validate();
-    // if (!isValid.valid) {
-    //   throw new Error(`Environment invalid: ${isValid.errors.join(', ')}`);
-    // }
-
-    return new Promise((resolve, reject) => {
-      // Get the path to the rolling-keys-supervisor.ts
-      const supervisorPath = path.join(
-        path.dirname(import.meta.url.replace("file://", "")),
-        "..",
-        "lib",
-        "rolling-keys-supervisor.ts"
-      );
-
-      // Use rolling keys supervisor for one-shot Claude spawn
-      const args = [
-        "run",
-        "--project",
-        this.config.dopplerProject,
-        "--config",
-        this.config.dopplerConfig,
-        "--",
-        "bun",
-        "run",
-        supervisorPath,
-        "-p",
-        prompt,
-      ];
-
-      const claude = spawn("doppler", args, {
-        cwd: this.config.cwd,
-      });
-
-      let stdout = "";
-      let stderr = "";
-
-      claude.stdout?.on("data", (data) => {
-        stdout += data.toString();
-      });
-
-      claude.stderr?.on("data", (data) => {
-        stderr += data.toString();
-      });
-
-      claude.on("close", (code) => {
-        if (code === 0) {
-          const ansiRegex = /\x1b\[[0-9;]*m/g;
-          const cleaned = stdout.replace(ansiRegex, "").trim();
-          resolve(cleaned);
-        } else {
-          reject(new Error(`Worker exited with code ${code}: ${stderr}`));
-        }
-      });
-
-      claude.on("error", (error) => {
-        reject(new Error(`Failed to spawn worker: ${error.message}`));
-      });
-
-      setTimeout(() => {
-        claude.kill("SIGTERM");
-        reject(new Error("Worker timed out"));
-      }, SPAWN_TIMEOUT_MS);
+    const worker = new GLMAgent({
+      prompt: PM_DAEMON_PROMPT,
+      model: this.config.model,
+      temperature: this.config.temperature,
+      maxTokens: this.config.maxTokens,
     });
+
+    return await worker.execute(prompt);
   }
 
   /**
@@ -501,43 +218,14 @@ export class DaemonLayerAgentService {
 
   /**
    * Get session stats
-   * 
-   * TODO: Add tooling status to stats
-   * return {
-   *   running: this.isRunning(),
-   *   repos: await this.tooling?.getStatus(),
-   * };
    */
   getSessionStats(): {
     running: boolean;
+    memoryLength: number;
   } {
     return {
       running: this.isRunning(),
+      memoryLength: this.memory.getLength(),
     };
   }
-
-  // ============================================================================
-  // TODO: Add tooling integration methods
-  // ============================================================================
-  
-  /**
-   * Sync all repos to latest
-   * async syncRepos(): Promise<void> {
-   *   await this.tooling?.sync();
-   * }
-   */
-  
-  /**
-   * Get current repo status
-   * async getRepoStatus(): Promise<RepoStatus> {
-   *   return await this.tooling?.getStatus();
-   * }
-   */
-  
-  /**
-   * Validate environment
-   * async validate(): Promise<ValidationResult> {
-   *   return await this.tooling?.validate();
-   * }
-   */
 }
