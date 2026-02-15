@@ -89,7 +89,15 @@ export class PmTelegramChannel implements ChannelConnector {
   private connected = false;
   private messageHandler?: MessageHandler;
 
-  constructor(config: PmTelegramConfig) {
+  constructor(config?: PmTelegramConfig) {
+    // Allow no-arg constructor for backwards compatibility
+    if (!config) {
+      const envConfig = createPmTelegramConfigFromEnv();
+      if (!envConfig) {
+        throw new Error("TELEGRAM_BOT_TOKEN is required");
+      }
+      config = envConfig;
+    }
     this.config = config;
     this.baseChannel = new BaseTelegramChannel(config);
     this.id = this.baseChannel.id;
