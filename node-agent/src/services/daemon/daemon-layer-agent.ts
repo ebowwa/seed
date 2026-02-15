@@ -95,7 +95,7 @@ export class DaemonLayerAgentService {
     };
 
     // Initialize conversation memory
-    this.memory = new ConversationMemory({ maxLength: 50 });
+    this.memory = new ConversationMemory({ maxMessages: 50 });
 
     // Initialize GLM agent with PM daemon prompt
     this.agent = new GLMAgent({
@@ -156,9 +156,9 @@ export class DaemonLayerAgentService {
       // Execute via GLM agent
       const responseText = await this.agent.execute(fullMessage);
 
-      // Store in memory for context
-      this.memory.addMessage("user", message);
-      this.memory.addMessage("assistant", responseText);
+      // Store in memory for context (use "pm-daemon" as conversation ID)
+      this.memory.add("pm-daemon", "user", message);
+      this.memory.add("pm-daemon", "assistant", responseText);
 
       return {
         text: responseText,
@@ -225,7 +225,7 @@ export class DaemonLayerAgentService {
   } {
     return {
       running: this.isRunning(),
-      memoryLength: this.memory.getLength(),
+      memoryLength: this.memory.messageCount("pm-daemon"),
     };
   }
 }
