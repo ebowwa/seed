@@ -1,6 +1,6 @@
 {
   "name": "seed-node-agent",
-  "version": "0.2.4",
+  "version": "0.3.1",
   "description": "Node Agent for Ralph Loop orchestration on VPS nodes",
   "type": "module",
   "main": "./dist/index.js",
@@ -43,7 +43,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@ebowwa/ai": "^0.2.0",
+    "@ebowwa/ai": "^0.3.2",
     "@ebowwa/channel-telegram": "^1.13.7",
     "@ebowwa/channel-types": "^0.1.1",
     "@ebowwa/glm-daemon": "^0.4.5",
