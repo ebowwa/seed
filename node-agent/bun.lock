@@ -6,9 +6,9 @@
       "name": "seed-node-agent",
       "dependencies": {
         "@ebowwa/ai": "^0.2.0",
-        "@ebowwa/channel-telegram": "^1.13.5",
+        "@ebowwa/channel-telegram": "^1.13.6",
         "@ebowwa/channel-types": "^0.1.1",
-        "@ebowwa/glm-daemon": "^0.4.4",
+        "@ebowwa/glm-daemon": "^0.4.5",
         "@ebowwa/rolling-keys": "^0.1.1",
       },
       "devDependencies": {
@@ -37,13 +37,13 @@
 
     "@ebowwa/ai": ["@ebowwa/ai@0.2.5", "", { "dependencies": { "@ebowwa/codespaces-types": "^1.4.2", "@modelcontextprotocol/sdk": "^1.0.0", "zod": "^3.24.0" } }, "sha512-Tso8O0B0Vo0POUTE3rd9qn7wVK9Fs9ezWPV/Xtr0XCQoVthI4jA0ugrDQoDmHlpnPovF4qwkejqON0SGH4DtFw=="],
 
-    "@ebowwa/channel-telegram": ["@ebowwa/channel-telegram@1.13.5", "", { "dependencies": { "@ebowwa/channel-types": "^0.1.1", "node-telegram-bot-api": "^0.66.0" } }, "sha512-tSUUhcAAHB3XtJkKUiPY85RhkjaXAQyJuz++fYRg+KITKd5INd8863QBvFFKbQEkWhoplWKuR61v8fQ9aHJ1Ig=="],
+    "@ebowwa/channel-telegram": ["@ebowwa/channel-telegram@1.13.6", "", { "dependencies": { "@ebowwa/channel-types": "^0.1.1", "node-telegram-bot-api": "^0.66.0" } }, "sha512-fb8WngnsGd6m7/fglWK0AgSkQ/1Exqd1ZHwvr6cAJu/T0+zlQIIanv6j9Bdcb2V/gBkwg44p1jDQNPb+5PpN7Q=="],
 
     "@ebowwa/channel-types": ["@ebowwa/channel-types@0.1.1", "", {}, "sha512-NMuKzpNo0HLQjoG3EXQ1undFQyOoPG3gvKH/k5jI6W/y+vCkpK9kVQ6DpPc0w0A7lfVqcvmK91eVk5YsR61hUA=="],
 
     "@ebowwa/codespaces-types": ["@ebowwa/codespaces-types@1.4.5", "", { "dependencies": { "zod": "^3.24.1" } }, "sha512-Q3DlC3rnpiCVtWpwOv3Q4r/Y3XCTSlFeuIAurBsPFQtK93J2/MTrSqHRkZEUKhiwiEUAHgRGgE7De3ysjnVFFw=="],
 
-    "@ebowwa/glm-daemon": ["@ebowwa/glm-daemon@0.4.4", "", { "dependencies": { "@ebowwa/ai": "^0.1.2", "@ebowwa/channel-telegram": "^1.13.0", "@ebowwa/channel-types": "^0.1.1", "@ebowwa/codespaces-types": "^1.4.0", "@ebowwa/structured-prompts": "^0.3.2", "@ebowwa/teammates": "^0.1.2", "discord.js": "^14.16.3", "zod": "^4.3.5" }, "bin": { "glm-daemon-telegram": "dist/bin/telegram-cli.js", "glm-daemon-discord": "dist/bin/discord-cli.js", "glm-daemon-manager": "dist/bin/manager.js" } }, "sha512-DvFOXKdfWZ6y5vheS3L7fHED3OsSXdThBoc5m5OWYDSyIHY/YbsAanNXLKzdgJQ69FqenLru78Hwo81WcR/7ew=="],
+    "@ebowwa/glm-daemon": ["@ebowwa/glm-daemon@0.4.5", "", { "dependencies": { "@ebowwa/ai": "^0.3.0", "@ebowwa/channel-telegram": "^1.13.0", "@ebowwa/channel-types": "^0.1.1", "@ebowwa/codespaces-types": "^1.4.5", "@ebowwa/structured-prompts": "^0.3.2", "@ebowwa/teammates": "^0.1.2", "discord.js": "^14.16.3", "zod": "^4.3.5" }, "bin": { "glm-daemon-telegram": "dist/bin/telegram-cli.js", "glm-daemon-discord": "dist/bin/discord-cli.js", "glm-daemon-manager": "dist/bin/manager.js" } }, "sha512-3B6ehNoOEtxYwyXXFaqsSzdaRluwSi0/tG8m43lqPgl8W3By5++brqoENBYaXMykZqc9WrMM6zc1zae8/3ZgVA=="],
 
     "@ebowwa/rolling-keys": ["@ebowwa/rolling-keys@0.1.1", "", { "dependencies": { "zod": "^3.24.0" } }, "sha512-zfTwnV+u1gD9SvH7dWNg0+1htrO2WyeF3GEznf8UQf4OH6m72gTOrMbZITZ36sTuLIlmGfSmx+lTDd6VmTqeJQ=="],
 
@@ -573,7 +573,7 @@
 
     "@discordjs/ws/@discordjs/collection": ["@discordjs/collection@2.1.1", "", {}, "sha512-LiSusze9Tc7qF03sLCujF5iZp7K+vRNEDBZ86FT9aQAv3vxMLihUvKvpsCWiQ2DJq1tVckopKm1rxomgNUc9hg=="],
 
-    "@ebowwa/glm-daemon/@ebowwa/ai": ["@ebowwa/ai@0.1.2", "", { "dependencies": { "@ebowwa/codespaces-types": "^1.4.0", "zod": "^3.24.0" } }, "sha512-TY7wqfKaG/d91FDJOlys2rTT/Tf1iQ2TnSxBesldbP5vky3razIZMq4PlRLFtD+1xwTVZrQtZ+STHjWikqVb1A=="],
+    "@ebowwa/glm-daemon/@ebowwa/ai": ["@ebowwa/ai@0.3.1", "", { "dependencies": { "@ebowwa/codespaces-types": "^1.4.5", "@ebowwa/structured-prompts": "^0.3.2", "@modelcontextprotocol/sdk": "^1.0.0", "zod": "^3.24.0" } }, "sha512-xFimnrFYeHxVWUT5m7rJlu6XwhA+/xbbXaRfLzlKMLBs1POaIpfuuZLzk6mmpmS2FPZWSuWLSwwHYbQP1CSUyQ=="],
 
     "@ebowwa/glm-daemon/zod": ["zod@4.3.6", "", {}, "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="],
 
