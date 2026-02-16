@@ -183,6 +183,13 @@ export class PmTelegramChannel implements ChannelConnector {
   }
 
   /**
+   * Get the allowed chat ID
+   */
+  getAllowedChatId(): number | undefined {
+    return this.config.allowedChatId;
+  }
+
+  /**
    * Send text message to the allowed chat
    */
   async sendText(

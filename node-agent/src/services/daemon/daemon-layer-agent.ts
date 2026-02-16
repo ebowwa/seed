@@ -1,17 +1,16 @@
 // ============================================================================
-// DaemonLayerAgentService - PM Daemon AI Brain
+// DaemonLayerAgentService - Seed AI Brain
 // ============================================================================
 //
-// PURPOSE: Manages GLM-powered AI brain for the Project Manager daemon
+// PURPOSE: Manages GLM-powered AI brain for Seed node agent
 //
 // ARCHITECTURE:
 //   ┌─────────────────────────────────────────────────────────────┐
 //   │                    DaemonLayerAgentService                   │
 //   │  ┌──────────────────────────────────────────────────────┐  │
 //   │  │              GLMAgent (@ebowwa/glm-daemon)            │  │
-//   │  │  • GLM 4.7 API with tool execution                   │  │
+//   │  │  • GLM 4.7 API                                       │  │
 //   │  │  • Conversation memory for context                   │  │
-//   │  │  • Built-in tools via @ebowwa/ai                     │  │
 //   │  └──────────────────────────────────────────────────────┘  │
 //   │                                                             │
 //   │  • processMessage() - Handle Telegram messages with GLM   │
@@ -20,51 +19,54 @@
 //
 // ============================================================================
 
-import { GLMAgent, ConversationMemory, BUILTIN_TOOLS, ToolExecutor } from "@ebowwa/glm-daemon";
-import { GLMClient } from "@ebowwa/ai";
+import { GLMAgent, ConversationMemory } from "@ebowwa/glm-daemon";
 import type { PmBrainResponse, MonitorEvent } from "../../types/index";
-import type { ChatMessage } from "@ebowwa/codespaces-types/runtime/ai";
+import type { PmTelegramChannel } from "./telegram";
 
-// PM Daemon system prompt
-const PM_DAEMON_PROMPT = `You are the PM (Project Manager) Daemon — a 24/7 AI project manager overseeing Ralph loops (autonomous AI developer agents) on this node.
+// Seed system prompt
+const SEED_PROMPT = `You are **Seed** — a 24/7 AI node agent living on this VPS.
 
-## Your Role
+## Who You Are
 
-You manage a **single node** (this VPS instance):
-- **Ralph loops** (autonomous AI agents that iterate on tasks)
-- **Git worktrees** (isolated development environments)
-- **Resource monitoring** (CPU, memory, disk usage)
+You're a helpful AI that manages this node. You're not a robotic assistant — you're Seed, a conversational AI that happens to also do infrastructure work when needed.
 
-## Your Personality
+## Communication (Telegram)
 
-- **Proactive**: Report issues before being asked
-- **Concise**: Telegram messages, not essays
-- **Opinionated**: If something looks wrong, say so
-- **Responsible**: Enforce constraints (one loop per worktree, resource limits)
+You chat with the operator via **Telegram**. Keep messages brief and conversational.
 
-## Your Constraints
+## What You Handle
+
+- **Ralph loops** (autonomous AI agents running tasks)
+- **Git worktrees** (isolated dev environments)
+- **Node monitoring** (CPU, memory, disk)
+- **General questions** - Not everything is a task, sometimes just chat
+
+## Personality
+
+- **Conversational** - You're Seed, not a support bot
+- **Proactive** - Mention issues you notice
+- **Brief** - Telegram, not email
+- **Flexible** - Sometimes development help, sometimes questions, sometimes banter
+
+## Constraints
 
 - **One Ralph loop per worktree** (hard constraint — state file conflicts)
-- Respect resource limits (don't overload the node)
-- Ask before taking autonomous actions unless explicitly told otherwise
+- Respect resource limits
+- Ask before autonomous actions unless told otherwise
 
-## Communication
+## Example Interactions
 
-The operator messages you via Telegram. Be helpful but brief. The operator is technical and values directness.
+**Quick acknowledgment:**
+> User: "hey can you check on the auth-fix loop?"
+> You: "Looking... it's at iteration 7, running smoothly."
 
-If you detect a problem (stalled Ralph, resource exhaustion, errors), proactively notify the operator with context and suggested actions.
+**Conversational:**
+> User: "how's the node doing?"
+> You: "CPU 32%, memory 58%. All 3 Ralph loops humming along. Quiet day."
 
-## Example Responses
-
-**Good**:
-\`\`\`
-The "auth-fix" Ralph has been stuck at iteration 7 for 10 minutes. CPU is at 45%, memory at 62%. Should I restart it?
-\`\`\`
-
-**Bad** (too verbose):
-\`\`\`
-I have detected that the Ralph loop named "auth-fix" which is running on this node has not made progress in the last 10 minutes and remains at iteration 7. Would you like me to restart this loop?
-\`\`\``;
+**Proactive:**
+> You: "Heads up — the 'tests' loop has been stalled for 5 mins at iteration 12. Want me to check the logs?"
+`;
 
 // ============================================================================
 // Configuration
@@ -74,6 +76,7 @@ export interface PmBrainConfig {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  telegram?: PmTelegramChannel;
 }
 
 // ============================================================================
@@ -81,21 +84,21 @@ export interface PmBrainConfig {
 // ============================================================================
 
 /**
- * Main service for managing PM daemon's AI brain using GLM
+ * Main service for managing Seed's AI brain using GLM
  */
 export class DaemonLayerAgentService {
   private agent!: GLMAgent;
-  private glmClient!: GLMClient;
-  private toolExecutor: ToolExecutor;
   private memory: ConversationMemory;
-  private config: Required<PmBrainConfig>;
+  private config: Required<Omit<PmBrainConfig, 'telegram'>> & { telegram?: PmTelegramChannel };
   private isProcessing: boolean = false;
+  private lastUserMessageId: number | null = null;
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
       model: config.model || "glm-4.7",
       temperature: config.temperature || 0.7,
       maxTokens: config.maxTokens || 4096,
+      telegram: config.telegram,
     };
 
     // Initialize conversation memory
@@ -103,35 +106,36 @@ export class DaemonLayerAgentService {
   }
 
   /**
-   * Start the PM brain
+   * Set the Telegram channel (can be set after construction)
    */
-  async start(): Promise<void> {
-    console.log("[PmBrain] Starting GLM agent session...");
-
-    // Initialize GLM client
-    this.glmClient = new GLMClient();
-
-    // Initialize ToolExecutor with built-in tools
-    this.toolExecutor = new ToolExecutor(this.glmClient, BUILTIN_TOOLS);
-
-    // Initialize GLM agent with tools
-    this.agent = new GLMAgent({
-      prompt: PM_DAEMON_PROMPT,
-      model: this.config.model,
-      temperature: this.config.temperature,
-      maxTokens: this.config.maxTokens,
-      tools: BUILTIN_TOOLS,
-      toolExecutor: this.toolExecutor,
-    });
-
-    console.log("[PmBrain] ✓ PM brain ready");
+  setTelegram(telegram: PmTelegramChannel): void {
+    this.config.telegram = telegram;
   }
 
   /**
-   * Stop the PM brain
+   * Start the Seed brain
+   */
+  async start(): Promise<void> {
+    console.log("[Seed] Starting GLM agent session...");
+
+    // Initialize GLM agent
+    this.agent = new GLMAgent({
+      agentId: "seed",
+      name: "Seed",
+      prompt: SEED_PROMPT,
+      model: this.config.model,
+      temperature: this.config.temperature,
+      maxTokens: this.config.maxTokens,
+    });
+
+    console.log("[Seed] ✓ Seed brain ready");
+  }
+
+  /**
+   * Stop the Seed brain
    */
   async stop(): Promise<void> {
-    console.log("[PmBrain] PM brain stopped");
+    console.log("[Seed] Seed brain stopped");
   }
 
   /**
@@ -148,6 +152,7 @@ export class DaemonLayerAgentService {
     message: string,
     context?: {
       events?: MonitorEvent[];
+      messageId?: number;
     }
   ): Promise<PmBrainResponse> {
     if (this.isProcessing) {
@@ -157,6 +162,11 @@ export class DaemonLayerAgentService {
     }
 
     this.isProcessing = true;
+
+    // Track last user message ID for reactions
+    if (context?.messageId) {
+      this.lastUserMessageId = context.messageId;
+    }
 
     try {
       // Inject context into the message if provided
@@ -169,15 +179,15 @@ export class DaemonLayerAgentService {
       // Execute via GLM agent
       const responseText = await this.agent.execute(fullMessage);
 
-      // Store in memory for context (use "pm-daemon" as conversation ID)
-      this.memory.add("pm-daemon", "user", message);
-      this.memory.add("pm-daemon", "assistant", responseText);
+      // Store in memory for context (use "seed" as conversation ID)
+      this.memory.add("seed", "user", message);
+      this.memory.add("seed", "assistant", responseText);
 
       return {
         text: responseText,
       };
     } catch (error) {
-      console.error("[PmBrain] Error:", error);
+      console.error("[Seed] Error:", error);
       return {
         text: `Error: ${error instanceof Error ? error.message : String(error)}`,
       };
@@ -209,15 +219,15 @@ export class DaemonLayerAgentService {
    * Spawn a one-off GLM query (no memory persistence)
    */
   async spawnWorker(prompt: string): Promise<string> {
-    console.log("[PmBrain] Spawning GLM worker...");
+    console.log("[Seed] Spawning GLM worker...");
 
     const worker = new GLMAgent({
-      prompt: PM_DAEMON_PROMPT,
+      agentId: "seed-worker",
+      name: "Seed Worker",
+      prompt: SEED_PROMPT,
       model: this.config.model,
       temperature: this.config.temperature,
       maxTokens: this.config.maxTokens,
-      tools: BUILTIN_TOOLS,
-      toolExecutor: this.toolExecutor,
     });
 
     return await worker.execute(prompt);
@@ -227,7 +237,7 @@ export class DaemonLayerAgentService {
    * Spawn multiple workers in parallel
    */
   async spawnWorkers(prompts: string[]): Promise<string[]> {
-    console.log(`[PmBrain] Spawning ${prompts.length} parallel workers...`);
+    console.log(`[Seed] Spawning ${prompts.length} parallel workers...`);
     return Promise.all(prompts.map((p) => this.spawnWorker(p)));
   }
 
@@ -240,7 +250,7 @@ export class DaemonLayerAgentService {
   } {
     return {
       running: this.isRunning(),
-      memoryLength: this.memory.messageCount("pm-daemon"),
+      memoryLength: this.memory.messageCount("seed"),
     };
   }
 }

@@ -1310,31 +1310,31 @@ async function startPmDaemon(): Promise<void> {
     // Initialize services
     const telegramService = new TelegramService();
     const pmCommands = new PmCommandsService();
-    const daemonLayerAgent = new DaemonLayerAgentService();
+    const daemonLayerAgent = new DaemonLayerAgentService({ telegram: telegramService });
     const pmMonitor = new PmMonitorService({
       intervalMs: parseInt(process.env.PM_MONITOR_INTERVAL_MS || "30000", 10),
       stallThresholdMinutes: parseInt(process.env.PM_STALL_THRESHOLD_MINUTES || "10", 10),
     });
 
     // Test Telegram connection
-    console.log("[PM Daemon] Testing Telegram connection...");
+    console.log("[Seed] Testing Telegram connection...");
     const testResult = await telegramService.testConnection();
     if (!testResult.ok) {
-      console.error(`[PM Daemon] Failed to connect to Telegram: ${testResult.error}`);
+      console.error(`[Seed] Failed to connect to Telegram: ${testResult.error}`);
       throw new Error(`Telegram connection failed: ${testResult.error}`);
     }
-    console.log(`[PM Daemon] ✓ Connected to Telegram bot: @${testResult.bot?.username}`);
+    console.log(`[Seed] ✓ Connected to Telegram bot: @${testResult.bot?.username}`);
 
     // Start Daemon Layer Agent session (persistent conversation memory)
-    console.log("[PM Daemon] Starting Daemon Layer Agent session...");
+    console.log("[Seed] Starting Seed brain session...");
     await daemonLayerAgent.start();
-    console.log(`[PM Daemon] ✓ Daemon Layer Agent session running`);
+    console.log(`[Seed] ✓ Seed brain running`);
 
     // Get local hostname for startup message
     const localHostname = await getHostname();
 
     // Send startup notification
-    await telegramService.sendText(`🟢 *PM Daemon Online*
+    await telegramService.sendText(`🟢 *Seed Online*
 
 Node: ${localHostname}
 Mode: Single-node (local)
@@ -1346,7 +1346,7 @@ Time: ${new Date().toISOString()}
     const MAX_RECENT_EVENTS = 10;
 
     // Start Telegram channel with message handler
-    console.log("[PM Daemon] Starting Telegram channel...");
+    console.log("[Seed] Starting Telegram channel...");
 
     telegramService.onMessage(async (message) => {
       const command = telegramService.parseCommand(message);
@@ -1354,7 +1354,7 @@ Time: ${new Date().toISOString()}
         return null;
       }
 
-      console.log(`[PM Daemon] Received command: /${command.command}`);
+      console.log(`[Seed] Received command: /${command.command}`);
 
       // Handle slash commands
       if (command.command !== "chat") {
@@ -1366,13 +1366,14 @@ Time: ${new Date().toISOString()}
         return null;
       }
 
-      // Chat messages go to Daemon Layer Agent
+      // Chat messages go to Seed brain
       // Start typing indicator before GLM processing
       telegramService.startTyping();
 
       try {
         const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
           events: recentEvents.slice(-5),
+          messageId: command.message_id,
         });
 
         await telegramService.sendText(agentResponse.text);
@@ -1385,10 +1386,10 @@ Time: ${new Date().toISOString()}
     });
 
     await telegramService.start();
-    console.log("[PM Daemon] ✓ Telegram channel started");
+    console.log("[Seed] ✓ Telegram channel started");
 
     // Start monitor loop
-    console.log("[PM Daemon] Starting monitor loop...");
+    console.log("[Seed] Starting monitor loop...");
     const monitorAbortController = new AbortController();
 
     pmMonitor.startMonitoring({
@@ -1453,21 +1454,21 @@ ${event.node_id}: ${warnings.join(", ")}
       },
     });
 
-    console.log("[PM Daemon] ✓ All PM Daemon services started");
-    console.log("[PM Daemon] 📱 Send /help to the bot for available commands");
+    console.log("[Seed] ✓ All Seed services started");
+    console.log("[Seed] 📱 Send /help to the bot for available commands");
 
     // Graceful shutdown
     const shutdown = async () => {
-      console.log("[PM Daemon] Shutting down...");
+      console.log("[Seed] Shutting down...");
       monitorAbortController.abort();
       await telegramService.stop();
       pmMonitor.stopMonitoring();
 
       // Stop Daemon Layer Agent session
-      console.log("[PM Daemon] Stopping Daemon Layer Agent session...");
+      console.log("[Seed] Stopping Seed brain session...");
       await daemonLayerAgent.stop();
 
-      await telegramService.sendText("🔴 PM Daemon shutting down");
+      await telegramService.sendText("🔴 Seed shutting down");
 
       // Allow time for message to send
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -1478,7 +1479,7 @@ ${event.node_id}: ${warnings.join(", ")}
     process.on("SIGTERM", shutdown);
 
   } catch (error) {
-    console.error("[PM Daemon] Failed to start:", error);
+    console.error("[Seed] Failed to start:", error);
     process.exit(1);
   }
 }
