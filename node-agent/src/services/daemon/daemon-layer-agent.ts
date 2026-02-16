@@ -8,18 +8,26 @@
 //   ┌─────────────────────────────────────────────────────────────┐
 //   │                    DaemonLayerAgentService                   │
 //   │  ┌──────────────────────────────────────────────────────┐  │
-//   │  │              GLMAgent (@ebowwa/glm-daemon)            │  │
+//   │  │              GLMClient (@ebowwa/ai)                   │  │
 //   │  │  • GLM 4.7 API                                       │  │
+//   │  │  • Tool calling with builtin tools                   │  │
 //   │  │  • Conversation memory for context                   │  │
 //   │  └──────────────────────────────────────────────────────┘  │
 //   │                                                             │
 //   │  • processMessage() - Handle Telegram messages with GLM   │
 //   │  • spawnWorker() - One-off GLM queries                    │
+//   │  • Tool output sent to Telegram (unless quiet mode)       │
 //   └─────────────────────────────────────────────────────────────┘
 //
 // ============================================================================
 
-import { GLMAgent, ConversationMemory } from "@ebowwa/glm-daemon";
+import { GLMClient } from "@ebowwa/ai";
+import {
+  BUILTIN_TOOLS,
+  toGLMFormat,
+  executeBuiltinTool,
+} from "@ebowwa/ai/tools";
+import type { ChatMessage } from "@ebowwa/codespaces-types/runtime/ai";
 import type { PmBrainResponse, MonitorEvent } from "../../types/index";
 import type { PmTelegramChannel } from "./telegram";
 
@@ -40,6 +48,17 @@ You chat with the operator via **Telegram**. Keep messages brief and conversatio
 - **Git worktrees** (isolated dev environments)
 - **Node monitoring** (CPU, memory, disk)
 - **General questions** - Not everything is a task, sometimes just chat
+
+## Tools Available
+
+You have access to these tools - USE THEM when appropriate:
+- **read_file** - Read file contents
+- **write_file** - Write/create files
+- **edit_file** - Edit files by replacing text
+- **list_dir** - List directory contents
+- **run_command** - Execute shell commands (git, system info, etc.)
+- **git_status** - Check git repository status
+- **system_info** - Get CPU, memory, disk, uptime
 
 ## Personality
 
@@ -84,14 +103,16 @@ export interface PmBrainConfig {
 // ============================================================================
 
 /**
- * Main service for managing Seed's AI brain using GLM
+ * Main service for managing Seed's AI brain using GLM with tool support
  */
 export class DaemonLayerAgentService {
-  private agent!: GLMAgent;
-  private memory: ConversationMemory;
-  private config: Required<Omit<PmBrainConfig, 'telegram'>> & { telegram?: PmTelegramChannel };
+  private client: GLMClient;
+  private config: Required<Omit<PmBrainConfig, "telegram">> & {
+    telegram?: PmTelegramChannel;
+  };
   private isProcessing: boolean = false;
   private lastUserMessageId: number | null = null;
+  private conversationHistory: ChatMessage[] = [];
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
@@ -101,8 +122,7 @@ export class DaemonLayerAgentService {
       telegram: config.telegram,
     };
 
-    // Initialize conversation memory
-    this.memory = new ConversationMemory({ maxMessages: 50 });
+    this.client = new GLMClient();
   }
 
   /**
@@ -117,18 +137,7 @@ export class DaemonLayerAgentService {
    */
   async start(): Promise<void> {
     console.log("[Seed] Starting GLM agent session...");
-
-    // Initialize GLM agent
-    this.agent = new GLMAgent({
-      agentId: "seed",
-      name: "Seed",
-      prompt: SEED_PROMPT,
-      model: this.config.model,
-      temperature: this.config.temperature,
-      maxTokens: this.config.maxTokens,
-    });
-
-    console.log("[Seed] ✓ Seed brain ready");
+    console.log("[Seed] ✓ Seed brain ready with tools:", BUILTIN_TOOLS.map(t => t.name).join(", "));
   }
 
   /**
@@ -142,11 +151,11 @@ export class DaemonLayerAgentService {
    * Check if brain is running
    */
   isRunning(): boolean {
-    return true; // GLM agent is always ready
+    return true; // GLM client is always ready
   }
 
   /**
-   * Process a message through GLM agent
+   * Process a message through GLM agent with tool support
    */
   async processMessage(
     message: string,
@@ -169,19 +178,103 @@ export class DaemonLayerAgentService {
     }
 
     try {
+      // Build messages array
+      const messages: ChatMessage[] = [
+        { role: "system", content: SEED_PROMPT },
+        ...this.conversationHistory.slice(-10),
+      ];
+
       // Inject context into the message if provided
       let fullMessage = message;
-
       if (context?.events && context.events.length > 0) {
         fullMessage = this.injectContext(message, context.events);
       }
 
-      // Execute via GLM agent
-      const responseText = await this.agent.execute(fullMessage);
+      messages.push({ role: "user", content: fullMessage });
 
-      // Store in memory for context (use "seed" as conversation ID)
-      this.memory.add("seed", "user", message);
-      this.memory.add("seed", "assistant", responseText);
+      // Get tools in GLM format
+      const tools = toGLMFormat(BUILTIN_TOOLS);
+
+      // First call with tools
+      let response = await this.client.chatCompletion(messages, {
+        model: this.config.model,
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxTokens,
+        tools,
+      });
+
+      // Handle tool calls in a loop (max 5 iterations)
+      let iterations = 0;
+      const maxIterations = 5;
+      let responseMessage = response.choices?.[0]?.message;
+
+      while (responseMessage?.tool_calls && iterations < maxIterations) {
+        iterations++;
+        console.log(`[Seed] Tool call iteration ${iterations}`);
+
+        // Add assistant message with tool calls to history
+        messages.push({
+          role: "assistant",
+          content: responseMessage.content || "",
+          tool_calls: responseMessage.tool_calls as any,
+        } as ChatMessage);
+
+        // Execute each tool call
+        for (const toolCall of responseMessage.tool_calls as Array<{
+          id: string;
+          function: { name: string; arguments: string };
+        }>) {
+          const toolName = toolCall.function.name;
+          let toolArgs: Record<string, unknown>;
+
+          try {
+            toolArgs = JSON.parse(toolCall.function.arguments);
+          } catch {
+            toolArgs = {};
+          }
+
+          console.log(`[Seed] Executing tool: ${toolName}(${JSON.stringify(toolArgs).slice(0, 100)})`);
+
+          // Send tool call to Telegram (unless quiet)
+          await this.sendToolOutput(`🔧 **${toolName}**(${Object.keys(toolArgs).join(", ")})`);
+
+          // Execute the tool
+          const toolResult = await executeBuiltinTool(toolName, toolArgs);
+
+          console.log(`[Seed] Tool result: ${toolResult.slice(0, 100)}...`);
+
+          // Send tool result to Telegram (unless quiet)
+          await this.sendToolOutput(`📤 ${toolResult.slice(0, 500)}${toolResult.length > 500 ? "..." : ""}`);
+
+          // Add tool result to messages
+          messages.push({
+            role: "tool",
+            content: toolResult,
+            tool_call_id: toolCall.id,
+          } as ChatMessage);
+        }
+
+        // Get next response
+        response = await this.client.chatCompletion(messages, {
+          model: this.config.model,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          tools,
+        });
+        responseMessage = response.choices?.[0]?.message;
+      }
+
+      // Extract final response text
+      const responseText = responseMessage?.content || "No response generated.";
+
+      // Update conversation history
+      this.conversationHistory.push({ role: "user", content: fullMessage });
+      this.conversationHistory.push({ role: "assistant", content: responseText });
+
+      // Keep history bounded
+      if (this.conversationHistory.length > 20) {
+        this.conversationHistory = this.conversationHistory.slice(-20);
+      }
 
       return {
         text: responseText,
@@ -193,6 +286,23 @@ export class DaemonLayerAgentService {
       };
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Send tool output to Telegram (respects quiet mode)
+   */
+  private async sendToolOutput(text: string): Promise<void> {
+    if (!this.config.telegram) return;
+
+    // Check quiet mode
+    const { isQuiet } = await import("@ebowwa/channel-telegram");
+    if (isQuiet()) return;
+
+    try {
+      await this.config.telegram.sendText(text);
+    } catch (error) {
+      console.error("[Seed] Failed to send tool output:", error);
     }
   }
 
@@ -216,21 +326,24 @@ export class DaemonLayerAgentService {
   }
 
   /**
-   * Spawn a one-off GLM query (no memory persistence)
+   * Spawn a one-off GLM query (no memory persistence, no tools)
    */
   async spawnWorker(prompt: string): Promise<string> {
     console.log("[Seed] Spawning GLM worker...");
 
-    const worker = new GLMAgent({
-      agentId: "seed-worker",
-      name: "Seed Worker",
-      prompt: SEED_PROMPT,
-      model: this.config.model,
-      temperature: this.config.temperature,
-      maxTokens: this.config.maxTokens,
-    });
+    const response = await this.client.chatCompletion(
+      [
+        { role: "system", content: SEED_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      {
+        model: this.config.model,
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxTokens,
+      }
+    );
 
-    return await worker.execute(prompt);
+    return response.choices[0]?.message?.content || "";
   }
 
   /**
@@ -250,7 +363,7 @@ export class DaemonLayerAgentService {
   } {
     return {
       running: this.isRunning(),
-      memoryLength: this.memory.messageCount("seed"),
+      memoryLength: this.conversationHistory.length,
     };
   }
 }
