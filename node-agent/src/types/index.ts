@@ -71,6 +71,9 @@ export interface CreateRalphLoopRequest {
   auto_commit?: boolean;
   auto_pr?: boolean;
   base_branch?: string;
+  // Project path (relative to ~/repos or absolute)
+  project_path?: string; // e.g., "tui-calculator" or "/root/repos/tui-calculator"
+  repository_url?: string; // Git URL to clone if not exists
 }
 
 // ============================================================================

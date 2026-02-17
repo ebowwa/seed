@@ -22,11 +22,7 @@
 // ============================================================================
 
 import { GLMClient } from "@ebowwa/ai";
-import {
-  BUILTIN_TOOLS,
-  toGLMFormat,
-  executeBuiltinTool,
-} from "@ebowwa/ai/tools";
+import { ToolExecutor, BUILTIN_TOOLS } from "@ebowwa/ai/tools";
 import type { ChatMessage } from "@ebowwa/codespaces-types/runtime/ai";
 import type { PmBrainResponse, MonitorEvent } from "../../types/index";
 import type { PmTelegramChannel } from "./telegram";
@@ -107,6 +103,7 @@ export interface PmBrainConfig {
  */
 export class DaemonLayerAgentService {
   private client: GLMClient;
+  private executor: ToolExecutor;
   private config: Required<Omit<PmBrainConfig, "telegram">> & {
     telegram?: PmTelegramChannel;
   };
@@ -123,6 +120,7 @@ export class DaemonLayerAgentService {
     };
 
     this.client = new GLMClient();
+    this.executor = new ToolExecutor(this.client, BUILTIN_TOOLS);
   }
 
   /**
@@ -137,7 +135,7 @@ export class DaemonLayerAgentService {
    */
   async start(): Promise<void> {
     console.log("[Seed] Starting GLM agent session...");
-    console.log("[Seed] ✓ Seed brain ready with tools:", BUILTIN_TOOLS.map(t => t.name).join(", "));
+    console.log("[Seed] ✓ Seed brain ready with tools:", BUILTIN_TOOLS.map((t) => t.name).join(", "));
   }
 
   /**
@@ -178,98 +176,48 @@ export class DaemonLayerAgentService {
     }
 
     try {
-      // Build messages array
-      const messages: ChatMessage[] = [
-        { role: "system", content: SEED_PROMPT },
-        ...this.conversationHistory.slice(-10),
-      ];
-
       // Inject context into the message if provided
       let fullMessage = message;
       if (context?.events && context.events.length > 0) {
         fullMessage = this.injectContext(message, context.events);
       }
 
-      messages.push({ role: "user", content: fullMessage });
+      // Build messages with conversation history
+      const messages: ChatMessage[] = [
+        ...this.conversationHistory.slice(-10),
+        { role: "user", content: fullMessage },
+      ];
 
-      // Get tools in GLM format
-      const tools = toGLMFormat(BUILTIN_TOOLS);
-
-      // First call with tools
-      let response = await this.client.chatCompletion(messages, {
-        model: this.config.model,
+      // Execute with tools using ToolExecutor
+      const result = await this.executor.executeWithTools(messages, {
+        systemPrompt: SEED_PROMPT,
+        maxIterations: 5,
         temperature: this.config.temperature,
         maxTokens: this.config.maxTokens,
-        tools,
+        logger: (msg: string) => {
+          console.log(`[Seed] ${msg}`);
+          // Also send to Telegram unless quiet
+          void this.sendToolOutput(msg);
+        },
       });
 
-      // Handle tool calls in a loop (max 5 iterations)
-      let iterations = 0;
-      const maxIterations = 5;
-      let responseMessage = response.choices?.[0]?.message;
-
-      while (responseMessage?.tool_calls && iterations < maxIterations) {
-        iterations++;
-        console.log(`[Seed] Tool call iteration ${iterations}`);
-
-        // Add assistant message with tool calls to history
-        messages.push({
-          role: "assistant",
-          content: responseMessage.content || "",
-          tool_calls: responseMessage.tool_calls as any,
-        } as ChatMessage);
-
-        // Execute each tool call
-        for (const toolCall of responseMessage.tool_calls as Array<{
-          id: string;
-          function: { name: string; arguments: string };
-        }>) {
+      // Send tool outputs to Telegram if not quiet
+      if (result.toolCalls.length > 0) {
+        for (const toolCall of result.toolCalls) {
           const toolName = toolCall.function.name;
-          let toolArgs: Record<string, unknown>;
-
-          try {
-            toolArgs = JSON.parse(toolCall.function.arguments);
-          } catch {
-            toolArgs = {};
+          const results = result.toolResults.get(toolName) || [];
+          const lastResult = results[results.length - 1];
+          if (lastResult) {
+            await this.sendToolOutput(
+              `📤 ${lastResult.slice(0, 500)}${lastResult.length > 500 ? "..." : ""}`
+            );
           }
-
-          console.log(`[Seed] Executing tool: ${toolName}(${JSON.stringify(toolArgs).slice(0, 100)})`);
-
-          // Send tool call to Telegram (unless quiet)
-          await this.sendToolOutput(`🔧 **${toolName}**(${Object.keys(toolArgs).join(", ")})`);
-
-          // Execute the tool
-          const toolResult = await executeBuiltinTool(toolName, toolArgs);
-
-          console.log(`[Seed] Tool result: ${toolResult.slice(0, 100)}...`);
-
-          // Send tool result to Telegram (unless quiet)
-          await this.sendToolOutput(`📤 ${toolResult.slice(0, 500)}${toolResult.length > 500 ? "..." : ""}`);
-
-          // Add tool result to messages
-          messages.push({
-            role: "tool",
-            content: toolResult,
-            tool_call_id: toolCall.id,
-          } as ChatMessage);
         }
-
-        // Get next response
-        response = await this.client.chatCompletion(messages, {
-          model: this.config.model,
-          temperature: this.config.temperature,
-          maxTokens: this.config.maxTokens,
-          tools,
-        });
-        responseMessage = response.choices?.[0]?.message;
       }
-
-      // Extract final response text
-      const responseText = responseMessage?.content || "No response generated.";
 
       // Update conversation history
       this.conversationHistory.push({ role: "user", content: fullMessage });
-      this.conversationHistory.push({ role: "assistant", content: responseText });
+      this.conversationHistory.push({ role: "assistant", content: result.content });
 
       // Keep history bounded
       if (this.conversationHistory.length > 20) {
@@ -277,7 +225,7 @@ export class DaemonLayerAgentService {
       }
 
       return {
-        text: responseText,
+        text: result.content,
       };
     } catch (error) {
       console.error("[Seed] Error:", error);
