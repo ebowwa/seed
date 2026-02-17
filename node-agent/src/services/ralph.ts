@@ -345,6 +345,7 @@ export class RalphService {
       checkpoints: [],
       current_checkpoint: null,
       target_base_branch: baseBranch,
+      project_path: projectPath,
     };
   }
 
