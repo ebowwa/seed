@@ -628,7 +628,8 @@ export class RalphService {
 
     const bunPath = path.join(process.env.HOME || "", ".bun", "bin", "bun");
 
-    // Pass prompt as argument to supervisor, which forwards to Claude
+    // Start Claude in interactive mode (no --print)
+    // Prompt will be sent via stdin after Claude starts
     const args = [
       "run",
       "--project",
@@ -639,11 +640,18 @@ export class RalphService {
       bunPath,
       "run",
       supervisorPath,
-      "--print",
-      prompt,
     ];
 
-    return spawn("doppler", args, options);
+    const child = spawn("doppler", args, options);
+
+    // Send prompt via stdin after a short delay (let Claude initialize)
+    setTimeout(() => {
+      if (child.stdin && !child.stdin.destroyed) {
+        child.stdin.write(prompt + "\n");
+      }
+    }, 3000);
+
+    return child;
   }
 
   private async findRalphIterativeStateFiles(): Promise<Array<{ filePath: string; projectName: string }>> {
