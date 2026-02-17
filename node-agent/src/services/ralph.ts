@@ -298,7 +298,7 @@ export class RalphService {
     await fsp.writeFile(settingsFile, JSON.stringify(settingsContent, null, 2));
 
     // Spawn Claude Code process
-    const child = await this.spawnClaudeProcess(loopId, projectPath);
+    const child = await this.spawnClaudeProcess(loopId, projectPath, request.prompt);
 
     if (!child.pid || !child.stdin || !child.stdout) {
       throw new Error("PROCESS_START_FAILED");
@@ -610,7 +610,7 @@ export class RalphService {
     }
   }
 
-  private async spawnClaudeProcess(loopId: string, projectPath: string): Promise<ReturnType<typeof spawn>> {
+  private async spawnClaudeProcess(loopId: string, projectPath: string, prompt: string): Promise<ReturnType<typeof spawn>> {
     const dopplerProject = process.env.DOPPLER_PROJECT || "seed";
     const dopplerConfig = process.env.DOPPLER_CONFIG || "prd";
 
@@ -628,6 +628,7 @@ export class RalphService {
 
     const bunPath = path.join(process.env.HOME || "", ".bun", "bin", "bun");
 
+    // Pass prompt as argument to supervisor, which forwards to Claude
     const args = [
       "run",
       "--project",
@@ -638,6 +639,8 @@ export class RalphService {
       bunPath,
       "run",
       supervisorPath,
+      "--print",
+      prompt,
     ];
 
     return spawn("doppler", args, options);

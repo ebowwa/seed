@@ -146,6 +146,15 @@ function isKeyError(error: string): boolean {
 }
 
 /**
+ * Pipe data between streams
+ */
+function pipeStream(src: NodeJS.ReadableStream, dest: NodeJS.WritableStream) {
+  src.on('data', (chunk) => dest.write(chunk));
+  src.on('end', () => dest.end && dest.end());
+  src.on('error', (err) => console.error('[Pipe Error]', err));
+}
+
+/**
  * Spawn Claude with rolling keys and auto-retry on failure
  */
 async function spawnClaudeWithRetry(args: string[], config: SupervisorConfig): Promise<number> {
@@ -165,13 +174,29 @@ async function spawnClaudeWithRetry(args: string[], config: SupervisorConfig): P
     const { key, index } = result;
     console.error(`[Rolling Keys] Using key ${index}: ${key.substring(0, 20)}...`);
 
-    // Spawn Claude with the selected key
+    // Spawn Claude with the selected key - use pipe mode for proper I/O forwarding
     const child = spawn("claude", args, {
       env: {
         ...process.env,
         ANTHROPIC_API_KEY: key,
       },
-      stdio: "inherit",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    // Pipe stdin/stdout/stderr between parent and child
+    // This allows RalphService to communicate with Claude
+    process.stdin.resume();
+    process.stdin.setRawMode(true);
+
+    process.stdin.pipe(child.stdin!);
+    child.stdout!.pipe(process.stdout);
+    child.stderr!.pipe(process.stderr);
+
+    // Handle terminal resize
+    process.stdout.on('resize', () => {
+      if (child.stdout && 'columns' in process.stdout) {
+        // Signal resize to child
+      }
     });
 
     // Monitor for errors and handle failures
@@ -181,6 +206,11 @@ async function spawnClaudeWithRetry(args: string[], config: SupervisorConfig): P
       child.on("exit", (code) => {
         if (!hasResolved) {
           hasResolved = true;
+          // Restore terminal
+          try {
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+          } catch {}
           resolve(code ?? 0);
         }
       });
