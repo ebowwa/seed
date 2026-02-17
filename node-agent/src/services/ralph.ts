@@ -144,6 +144,7 @@ export class RalphService {
           checkpoints: state.checkpoints || [],
           current_checkpoint: state.currentCheckpoint,
           target_base_branch: state.targetBaseBranch || "dev",
+          project_path: state.projectPath,
         });
       } catch (error) {
         console.error(`Failed to parse state file ${filePath}:`, error);
