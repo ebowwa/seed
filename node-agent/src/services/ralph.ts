@@ -645,9 +645,10 @@ export class RalphService {
     const child = spawn("doppler", args, options);
 
     // Send prompt via stdin after a short delay (let Claude initialize)
+    // Include skill invocation for autonomous loop
     setTimeout(() => {
       if (child.stdin && !child.stdin.destroyed) {
-        child.stdin.write(prompt + "\n");
+        child.stdin.write(`/ralph-iterative:go ${prompt}\n`);
       }
     }, 3000);
 
