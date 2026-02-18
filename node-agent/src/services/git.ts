@@ -3,7 +3,7 @@
 import { promises as fsp } from "fs";
 import { exec } from "child_process";
 import { promisify } from "util";
-import path from "path";
+import * as path from "path";
 import type { Worktree, CreateWorktreeRequest } from "@ebowwa/codespaces-types/compile";
 import { GitHubPrService } from "./github-pr.js";
 
