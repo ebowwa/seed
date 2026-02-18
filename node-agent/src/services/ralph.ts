@@ -611,14 +611,6 @@ export class RalphService {
   }
 
   private async spawnClaudeProcess(loopId: string, projectPath: string, prompt: string): Promise<ReturnType<typeof spawn>> {
-    const dopplerProject = process.env.DOPPLER_PROJECT || "seed";
-    const dopplerConfig = process.env.DOPPLER_CONFIG || "prd";
-
-    const options = {
-      cwd: projectPath,
-      stdio: ["pipe", "pipe", "pipe"] as const,
-    };
-
     const supervisorPath = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       "..",
@@ -628,21 +620,19 @@ export class RalphService {
 
     const bunPath = path.join(process.env.HOME || "", ".bun", "bin", "bun");
 
-    // Start Claude in interactive mode (no --print)
-    // Prompt will be sent via stdin after Claude starts
-    const args = [
-      "run",
-      "--project",
-      dopplerProject,
-      "--config",
-      dopplerConfig,
-      "--",
-      bunPath,
-      "run",
-      supervisorPath,
-    ];
+    // Spawn bun directly (not through doppler) to preserve stdin pipe
+    // We already have doppler secrets in our env, pass them through
+    const options = {
+      cwd: projectPath,
+      stdio: ["pipe", "pipe", "pipe"] as const,
+      env: {
+        ...process.env,
+        // Ensure rolling keys env is passed
+        ANTHROPIC_API_KEYS: process.env.ANTHROPIC_API_KEYS || process.env.ANTHROPIC_API_KEY,
+      },
+    };
 
-    const child = spawn("doppler", args, options);
+    const child = spawn(bunPath, ["run", supervisorPath], options);
 
     // Send prompt via stdin after Claude initializes through supervisor
     // Supervisor needs ~5s to start, Claude needs ~5s more
