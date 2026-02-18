@@ -639,8 +639,8 @@ export class RalphService {
     setTimeout(() => {
       if (child.stdin && !child.stdin.destroyed) {
         console.log(`[RalphService] Sending prompt to loop after delay...`);
-        // Use /ralph-loop command with completion promise
-        child.stdin.write(`/ralph-loop ${prompt} --completion-promise TASK_COMPLETE\n`);
+        // Use ralph-iterative:go command for proper loop execution
+        child.stdin.write(`/ralph-iterative:go ${prompt} --completion-promise TASK_COMPLETE\n`);
       } else {
         console.error(`[RalphService] Cannot send prompt - stdin not available`);
       }
