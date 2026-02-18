@@ -182,7 +182,8 @@ export class RalphService {
     // Setup state file paths
     const pidFile = path.join(PIDS_DIR, `${loopId}.pid`);
     const logFile = path.join(LOGS_DIR, `${loopId}.log`);
-    const stateFilePath = path.join(projectPath, ".claude", `.ralph-iterative.${loopId}.json`);
+    // Use standard ralph-iterative state file name so hooks can find it
+    const stateFilePath = path.join(projectPath, ".claude", ".ralph-iterative.local.json");
 
     // Check if already running
     if (await this.fileExists(pidFile)) {
@@ -567,6 +568,7 @@ export class RalphService {
   /**
    * Get loop state file path and content
    * Searches for the state file in all known directories
+   * Checks both standard local.json and loop-specific files
    */
   private async getLoopState(loopId: string): Promise<{
     stateFilePath: string;
@@ -575,12 +577,30 @@ export class RalphService {
   }> {
     // Search for state file in all scan directories
     for (const scanDir of RALPH_SCAN_DIRS) {
-      const possiblePath = path.join(scanDir, ".claude", `.ralph-iterative.${loopId}.json`);
+      // Try standard local.json first (what ralph-iterative hooks expect)
+      const localPath = path.join(scanDir, ".claude", ".ralph-iterative.local.json");
       try {
-        const content = await fsp.readFile(possiblePath, "utf-8");
+        const content = await fsp.readFile(localPath, "utf-8");
+        const state: RalphLoopStateFileWithCheckpoints = JSON.parse(content);
+        // Check if this state file belongs to our loop (by loopId in content)
+        if (state.loopId === loopId) {
+          return {
+            stateFilePath: localPath,
+            projectPath: state.projectPath || path.join(REPOS_BASE_PATH, DEFAULT_REPO),
+            state,
+          };
+        }
+      } catch {
+        // Continue to next option
+      }
+
+      // Try loop-specific file as fallback
+      const loopPath = path.join(scanDir, ".claude", `.ralph-iterative.${loopId}.json`);
+      try {
+        const content = await fsp.readFile(loopPath, "utf-8");
         const state: RalphLoopStateFileWithCheckpoints = JSON.parse(content);
         return {
-          stateFilePath: possiblePath,
+          stateFilePath: loopPath,
           projectPath: state.projectPath || path.join(REPOS_BASE_PATH, DEFAULT_REPO),
           state,
         };
@@ -658,7 +678,8 @@ export class RalphService {
     for (const scanDir of RALPH_SCAN_DIRS) {
       try {
         await fsp.access(scanDir);
-        const entries = await this.findFilesRecursive(scanDir, ".ralph-iterative.*.json");
+        // Look for both standard local.json and any loop-specific files
+        const entries = await this.findFilesRecursive(scanDir, "\\.ralph-iterative\\.(local|[a-zA-Z0-9-]+)\\.json");
 
         for (const filePath of entries) {
           const parts = filePath.split(path.sep);
