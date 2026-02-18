@@ -627,8 +627,10 @@ export class RalphService {
       stdio: ["pipe", "pipe", "pipe"] as const,
       env: {
         ...process.env,
-        // Ensure rolling keys env is passed
-        ANTHROPIC_API_KEYS: process.env.ANTHROPIC_API_KEYS || process.env.ANTHROPIC_API_KEY,
+        // Ensure rolling keys env is passed as JSON array
+        // Supervisor expects format: '["key1","key2"]'
+        ANTHROPIC_API_KEYS: process.env.ANTHROPIC_API_KEYS ||
+          (process.env.ANTHROPIC_API_KEY ? JSON.stringify([process.env.ANTHROPIC_API_KEY]) : undefined),
       },
     };
 
