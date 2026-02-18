@@ -66,6 +66,9 @@ export interface CreateRalphLoopRequest {
   prompt: string;
   max_iterations?: number;
   completion_promise?: string;
+  // Configurable phrase that signals task completion (sets slam.phase = "complete" when detected)
+  // Can be any string like "DONE", "TASK_FINISHED", "IMPLEMENTATION_COMPLETE"
+  completion_phrase?: string;
   // Ralph Iterative options
   enable_subagents?: boolean;
   auto_commit?: boolean;
@@ -158,6 +161,8 @@ export interface RalphLoopStateFile {
 export interface RalphIterativeStateFile {
   prompt: string;
   promise?: string;
+  // Configurable completion phrase - when detected in output, sets slam.phase = "complete"
+  completionPhrase?: string;
   iteration: number;
   startTime: string;
   lastUpdate: string;

@@ -211,6 +211,7 @@ export class RalphService {
       projectPath, // Store project path in state
       prompt: request.prompt,
       promise: request.completion_promise || "TASK_COMPLETE",
+      completionPhrase: request.completion_phrase, // Configurable completion phrase
       iteration: 0,
       startTime: now,
       lastUpdate: now,
