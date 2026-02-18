@@ -185,8 +185,11 @@ async function spawnClaudeWithRetry(args: string[], config: SupervisorConfig): P
 
     // Pipe stdin/stdout/stderr between parent and child
     // This allows RalphService to communicate with Claude
+    // Note: setRawMode only works on TTY, check before calling
     process.stdin.resume();
-    process.stdin.setRawMode(true);
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      process.stdin.setRawMode(true);
+    }
 
     process.stdin.pipe(child.stdin!);
     child.stdout!.pipe(process.stdout);
@@ -206,9 +209,11 @@ async function spawnClaudeWithRetry(args: string[], config: SupervisorConfig): P
       child.on("exit", (code) => {
         if (!hasResolved) {
           hasResolved = true;
-          // Restore terminal
+          // Restore terminal (only if TTY)
           try {
-            process.stdin.setRawMode(false);
+            if (process.stdin.isTTY && process.stdin.setRawMode) {
+              process.stdin.setRawMode(false);
+            }
             process.stdin.pause();
           } catch {}
           resolve(code ?? 0);
