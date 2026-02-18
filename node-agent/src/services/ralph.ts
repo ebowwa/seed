@@ -644,13 +644,16 @@ export class RalphService {
 
     const child = spawn("doppler", args, options);
 
-    // Send prompt via stdin after a short delay (let Claude initialize)
-    // Include skill invocation for autonomous loop
+    // Send prompt via stdin after Claude initializes through supervisor
+    // Supervisor needs ~5s to start, Claude needs ~5s more
     setTimeout(() => {
       if (child.stdin && !child.stdin.destroyed) {
+        console.log(`[RalphService] Sending prompt to loop after delay...`);
         child.stdin.write(`/ralph-iterative:go ${prompt}\n`);
+      } else {
+        console.error(`[RalphService] Cannot send prompt - stdin not available`);
       }
-    }, 3000);
+    }, 10000);
 
     return child;
   }
