@@ -176,7 +176,7 @@ async function spawnClaudeWithRetry(args: string[], config: SupervisorConfig): P
 
     // Spawn Claude with the selected key - use pipe mode for proper I/O forwarding
     const child = spawn("claude", args, {
-      cwd: process.cwd(), // Inherit working directory from parent (set by RalphService)
+      cwd: process.env.RALPH_PROJECT_PATH || process.cwd(), // Use project path from RalphService
       env: {
         ...process.env,
         ANTHROPIC_API_KEY: key,

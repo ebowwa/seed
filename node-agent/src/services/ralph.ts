@@ -647,6 +647,8 @@ export class RalphService {
       stdio: ["pipe", "pipe", "pipe"] as const,
       env: {
         ...process.env,
+        // Pass project path to supervisor so it can set Claude's cwd
+        RALPH_PROJECT_PATH: projectPath,
         // Ensure rolling keys env is passed as JSON array
         // Supervisor expects format: '["key1","key2"]'
         ANTHROPIC_API_KEYS: process.env.ANTHROPIC_API_KEYS ||
