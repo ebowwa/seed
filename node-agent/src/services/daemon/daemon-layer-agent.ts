@@ -22,10 +22,15 @@
 // ============================================================================
 
 import { GLMClient } from "@ebowwa/ai";
-import { ToolExecutor, BUILTIN_TOOLS } from "@ebowwa/ai/tools";
+import {
+  ToolExecutor,
+  BUILTIN_TOOLS,
+  type ToolDefinition,
+} from "@ebowwa/ai/tools";
 import type { ChatMessage } from "@ebowwa/codespaces-types/runtime/ai";
 import type { PmBrainResponse, MonitorEvent } from "../../types/index";
 import type { PmTelegramChannel } from "./telegram";
+import { MCPManager, type MCPTool } from "../../lib/mcp-client.js";
 
 // Seed system prompt
 const SEED_PROMPT = `You are **Seed** — a 24/7 AI node agent living on this VPS.
@@ -55,6 +60,7 @@ You have access to these tools - USE THEM when appropriate:
 - **run_command** - Execute shell commands (git, system info, etc.)
 - **git_status** - Check git repository status
 - **system_info** - Get CPU, memory, disk, uptime
+- **MCP Tools** - Additional tools from MCP servers (git-mcp, etc.)
 
 ## Personality
 
@@ -92,6 +98,7 @@ export interface PmBrainConfig {
   temperature?: number;
   maxTokens?: number;
   telegram?: PmTelegramChannel;
+  mcpConfigPath?: string; // Path to MCP config file (default: /root/.mcp.json)
 }
 
 // ============================================================================
@@ -104,12 +111,15 @@ export interface PmBrainConfig {
 export class DaemonLayerAgentService {
   private client: GLMClient;
   private executor: ToolExecutor;
-  private config: Required<Omit<PmBrainConfig, "telegram">> & {
+  private config: Required<Omit<PmBrainConfig, "telegram" | "mcpConfigPath">> & {
     telegram?: PmTelegramChannel;
+    mcpConfigPath?: string;
   };
   private isProcessing: boolean = false;
   private lastUserMessageId: number | null = null;
   private conversationHistory: ChatMessage[] = [];
+  private mcpManager: MCPManager | null = null;
+  private mcpTools: ToolDefinition[] = [];
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
@@ -117,10 +127,12 @@ export class DaemonLayerAgentService {
       temperature: config.temperature || 0.7,
       maxTokens: config.maxTokens || 4096,
       telegram: config.telegram,
+      mcpConfigPath: config.mcpConfigPath || "/root/.mcp.json",
     };
 
     this.client = new GLMClient();
-    this.executor = new ToolExecutor(this.client, BUILTIN_TOOLS);
+    // Executor will be initialized with all tools (builtin + MCP) in start()
+    this.executor = new ToolExecutor(this.client, [...BUILTIN_TOOLS]);
   }
 
   /**
@@ -135,7 +147,20 @@ export class DaemonLayerAgentService {
    */
   async start(): Promise<void> {
     console.log("[Seed] Starting GLM agent session...");
-    console.log("[Seed] ✓ Seed brain ready with tools:", BUILTIN_TOOLS.map((t) => t.name).join(", "));
+
+    // Start MCP servers if configured
+    const mcpConfigPath = this.config.mcpConfigPath;
+    if (mcpConfigPath) {
+      try {
+        await this.loadMCPServers(mcpConfigPath);
+      } catch (error) {
+        console.error("[Seed] Failed to load MCP servers:", error);
+        console.log("[Seed] Continuing with builtin tools only...");
+      }
+    }
+
+    const allTools = [...BUILTIN_TOOLS, ...this.mcpTools];
+    console.log("[Seed] ✓ Seed brain ready with tools:", allTools.map((t) => t.name).join(", "));
   }
 
   /**
@@ -143,6 +168,12 @@ export class DaemonLayerAgentService {
    */
   async stop(): Promise<void> {
     console.log("[Seed] Seed brain stopped");
+
+    // Stop MCP servers
+    if (this.mcpManager) {
+      await this.mcpManager.stopAll();
+      this.mcpManager = null;
+    }
   }
 
   /**
@@ -313,5 +344,84 @@ export class DaemonLayerAgentService {
       running: this.isRunning(),
       memoryLength: this.conversationHistory.length,
     };
+  }
+
+  /**
+   * Load MCP servers from config file
+   */
+  private async loadMCPServers(configPath: string): Promise<void> {
+    console.log("[Seed] Loading MCP servers from:", configPath);
+
+    // Check if config file exists
+    const fs = await import("fs/promises");
+    try {
+      await fs.access(configPath);
+    } catch (error) {
+      console.log("[Seed] MCP config file not found, skipping MCP loading");
+      return;
+    }
+
+    // Create MCP manager from config
+    this.mcpManager = await MCPManager.fromConfig(configPath);
+
+    // Start all MCP servers
+    await this.mcpManager.startAll();
+
+    // Discover tools from all servers
+    await this.mcpManager.discoverTools();
+
+    // Convert MCP tools to ToolDefinition format
+    this.mcpTools = this.convertMCPTools(this.mcpManager.getAllTools());
+
+    // Update executor with all tools
+    this.executor = new ToolExecutor(this.client, [
+      ...BUILTIN_TOOLS,
+      ...this.mcpTools,
+    ]);
+
+    console.log(`[Seed] Loaded ${this.mcpTools.length} MCP tools`);
+  }
+
+  /**
+   * Convert MCP tools to ToolDefinition format
+   */
+  private convertMCPTools(mcpTools: MCPTool[]): ToolDefinition[] {
+    return mcpTools.map((mcpTool) => ({
+      name: mcpTool.name,
+      description: mcpTool.description || `MCP tool: ${mcpTool.name}`,
+      parameters: mcpTool.inputSchema as ToolDefinition["parameters"],
+      handler: async (args: Record<string, unknown>) => {
+        if (!this.mcpManager) {
+          throw new Error("MCP manager not initialized");
+        }
+
+        const result = await this.mcpManager.callTool(mcpTool.name, args);
+
+        // Handle different result formats
+        if (typeof result === "string") {
+          return result;
+        }
+
+        if (result && typeof result === "object") {
+          // Handle content array format from MCP spec
+          if ("content" in result && Array.isArray(result.content)) {
+            return result.content
+              .map((item: unknown) => {
+                if (typeof item === "string") return item;
+                if (typeof item === "object" && item !== null) {
+                  if ("text" in item) return (item as { text: string }).text;
+                  return JSON.stringify(item);
+                }
+                return String(item);
+              })
+              .join("\n");
+          }
+
+          return JSON.stringify(result, null, 2);
+        }
+
+        return String(result ?? "");
+      },
+    }));
   }
 }
