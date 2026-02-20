@@ -1,0 +1,63 @@
+{
+  "name": "@ebowwa/data-normalizer",
+  "version": "1.0.0",
+  "description": "Data normalization hook for worldmonitor feeds - transforms real-world data for prediction market pricing analysis",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./types": {
+      "import": "./dist/types.js",
+      "types": "./dist/types.d.ts"
+    },
+    "./history": {
+      "import": "./dist/history.js",
+      "types": "./dist/history.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun && tsc --emitDeclarationOnly --declaration --outDir dist",
+    "dev": "bun --watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.0.0"
+  },
+  "keywords": [
+    "prediction-markets",
+    "data-normalization",
+    "worldmonitor",
+    "kalshi",
+    "polymarket",
+    "pricing-analysis",
+    "correlation-signals"
+  ],
+  "author": "ebowwa",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ebowwa/seed.git",
+    "directory": "data-normalizer"
+  },
+  "bugs": {
+    "url": "https://github.com/ebowwa/seed/issues"
+  },
+  "homepage": "https://github.com/ebowwa/seed#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
