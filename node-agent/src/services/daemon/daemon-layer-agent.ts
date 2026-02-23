@@ -95,9 +95,13 @@ You have access to these tools - USE THEM when appropriate:
 
 export interface PmBrainConfig {
   model?: string;
+  // we should allow changing urls too for adjustable client providers from the distributionclientchannel
   temperature?: number;
+  // from 0.0-2.0
   maxTokens?: number;
+  // TODO: we have other channels and want more future channels this is too hardcoded to telegram it should be generic like distributionclientchannel?
   telegram?: PmTelegramChannel;
+  // TODO: we should add the prompt here
   mcpConfigPath?: string; // Path to MCP config file (default: /root/.mcp.json)
 }
 
@@ -123,6 +127,7 @@ export class DaemonLayerAgentService {
 
   constructor(config: PmBrainConfig = {}) {
     this.config = {
+      // TODO: CHANNELS should be able to control the model, temperatures
       model: config.model || "glm-4.7",
       temperature: config.temperature || 0.7,
       maxTokens: config.maxTokens || 4096,
