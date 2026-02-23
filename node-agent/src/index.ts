@@ -1333,12 +1333,12 @@ async function startPmDaemon(): Promise<void> {
     // Get local hostname for startup message
     const localHostname = await getHostname();
 
-    // Send startup notification
+    // Send startup notification (acknowledge the channel)
     await telegramService.sendText(`🟢 *Seed Online*
 
-Node: ${localHostname}
-Mode: Single-node (local)
-Time: ${new Date().toISOString()}
+📱 *Channel:* Telegram
+🖥️ *Node:* \`${localHostname}\`
+⏰ *Time:* ${new Date().toISOString()}
 `);
 
     // Recent events for context (circular buffer)
