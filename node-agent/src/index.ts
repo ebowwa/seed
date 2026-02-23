@@ -29,6 +29,7 @@ import { TelegramService } from "./services/daemon/telegram";
 import { PmCommandsService } from "./services/daemon/pm-commands";
 import { PmMonitorService } from "./services/daemon/pm-monitor";
 import { DaemonLayerAgentService } from "./services/daemon/daemon-layer-agent";
+import { ChannelRouter, type RoutedMessage } from "./services/channels";
 
 // Configuration
 const PORT = parseInt(process.env.NODE_AGENT_PORT || "8911", 10);
@@ -1307,6 +1308,18 @@ if (PM_DAEMON_ENABLED) {
  */
 async function startPmDaemon(): Promise<void> {
   try {
+    // Get hostname for announcements
+    const localHostname = await getHostname();
+
+    // Initialize channel router with announcement config
+    const router = new ChannelRouter({
+      announcement: {
+        serverName: localHostname,
+        hostname: localHostname,
+        version: "0.6.1",
+      },
+    });
+
     // Initialize services
     const telegramService = new TelegramService();
     const pmCommands = new PmCommandsService();
@@ -1325,6 +1338,21 @@ async function startPmDaemon(): Promise<void> {
     }
     console.log(`[Seed] ✓ Connected to Telegram bot: @${testResult.bot?.username}`);
 
+    // Get user info for announcements
+    const chatInfo = await telegramService.getChatInfo();
+    let userDisplay = "Unknown";
+    if (chatInfo) {
+      if (chatInfo.username) {
+        userDisplay = `@${chatInfo.username}`;
+      } else if (chatInfo.firstName) {
+        userDisplay = chatInfo.lastName
+          ? `${chatInfo.firstName} ${chatInfo.lastName}`
+          : chatInfo.firstName;
+      } else if (chatInfo.title) {
+        userDisplay = chatInfo.title;
+      }
+    }
+
     // Start Daemon Layer Agent session (persistent conversation memory)
     console.log("[Seed] Starting Seed brain session...");
     await daemonLayerAgent.start();
@@ -1334,16 +1362,19 @@ async function startPmDaemon(): Promise<void> {
     const recentEvents: MonitorEvent[] = [];
     const MAX_RECENT_EVENTS = 10;
 
-    // Start Telegram channel with message handler
-    console.log("[Seed] Starting Telegram channel...");
+    // Register Telegram channel with router
+    console.log("[Seed] Registering Telegram channel with router...");
+    router.register(telegramService);
+    console.log("[Seed] ✓ Telegram channel registered");
 
-    telegramService.onMessage(async (message) => {
-      const command = telegramService.parseCommand(message);
+    // Set up router message handler
+    router.setHandler(async (routed: RoutedMessage) => {
+      const command = telegramService.parseCommand(routed.message);
       if (!command) {
-        return null;
+        return;
       }
 
-      console.log(`[Seed] Received command: /${command.command}`);
+      console.log(`[Seed] Received command via router: /${command.command} from ${routed.channelLabel}`);
 
       // Handle slash commands
       if (command.command !== "chat") {
@@ -1352,11 +1383,10 @@ async function startPmDaemon(): Promise<void> {
           parse_mode: response.parse_mode,
           reply_to_message_id: response.reply_to_message_id,
         });
-        return null;
+        return;
       }
 
       // Chat messages go to Seed brain
-      // Start typing indicator before GLM processing
       telegramService.startTyping();
 
       try {
@@ -1368,15 +1398,19 @@ async function startPmDaemon(): Promise<void> {
 
         await telegramService.sendText(agentResponse.text);
       } finally {
-        // Always stop typing indicator, even on error
         telegramService.stopTyping();
       }
-
-      return null;
     });
 
-    await telegramService.start();
-    console.log("[Seed] ✓ Telegram channel started");
+    // Start the router (starts all registered channels)
+    console.log("[Seed] Starting channel router...");
+    await router.start();
+    console.log("[Seed] ✓ Channel router started");
+
+    // Announce online to all channels
+    await router.announceOnline([
+      { label: "Telegram", userInfo: userDisplay },
+    ]);
 
     // Start monitor loop
     console.log("[Seed] Starting monitor loop...");
@@ -1385,7 +1419,6 @@ async function startPmDaemon(): Promise<void> {
     pmMonitor.startMonitoring({
       signal: monitorAbortController.signal,
       onEvent: async (event) => {
-        // Add to recent events
         recentEvents.push(event);
         if (recentEvents.length > MAX_RECENT_EVENTS) {
           recentEvents.shift();
@@ -1435,7 +1468,6 @@ ${event.node_id}: ${warnings.join(", ")}
               break;
 
             default:
-              // For other events, let the PM brain decide whether to notify
               return;
           }
 
@@ -1450,9 +1482,15 @@ ${event.node_id}: ${warnings.join(", ")}
     // Graceful shutdown
     const shutdown = async () => {
       console.log("[Seed] Shutting down...");
+
+      // Announce offline before stopping
+      await router.announceOffline("Graceful shutdown");
+
       monitorAbortController.abort();
-      await telegramService.stop();
       pmMonitor.stopMonitoring();
+
+      // Stop router (stops all channels)
+      await router.stop();
 
       // Stop Daemon Layer Agent session
       console.log("[Seed] Stopping Seed brain session...");
