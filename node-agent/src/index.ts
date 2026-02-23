@@ -1322,7 +1322,9 @@ async function startPmDaemon(): Promise<void> {
           { name: "@ebowwa/channel-core", version: "^1.2.1" },
           { name: "@ebowwa/channel-telegram", version: "^1.14.2" },
           { name: "@ebowwa/glm-daemon", version: "^0.4.7" },
-          { name: "@ebowwa/ai", version: "^0.3.2" },
+          { name: "@ebowwa/ai", version: "^0.3.3" },
+          { name: "@ebowwa/channel-types", version: "^0.2.1" },
+          { name: "@ebowwa/codespaces-types", version: "^1.6.1" },
         ],
       },
     });
