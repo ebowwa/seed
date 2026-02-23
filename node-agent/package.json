@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@ebowwa/ai": "^0.3.2",
+    "@ebowwa/channel-core": "file:../../../src/channel-core",
     "@ebowwa/channel-telegram": "^1.13.7",
     "@ebowwa/channel-types": "^0.1.1",
     "@ebowwa/codespaces-types": "^1.6.0",
