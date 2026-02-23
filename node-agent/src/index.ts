@@ -1374,6 +1374,7 @@ Time: ${new Date().toISOString()}
         const agentResponse = await daemonLayerAgent.processMessage(command.raw_text, {
           events: recentEvents.slice(-5),
           messageId: command.message_id,
+          channelType: command.channelType,
         });
 
         await telegramService.sendText(agentResponse.text);

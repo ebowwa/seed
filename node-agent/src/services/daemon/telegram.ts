@@ -19,7 +19,7 @@ import {
   type MessageHandler,
 } from "../channels";
 
-import type { PmCommand } from "../../types/index";
+import type { PmCommand, ChannelType } from "../../types/index";
 
 // Configuration from environment
 const TELEGRAM_CHAT_ID = parseInt(process.env.TELEGRAM_CHAT_ID || "", 10);
@@ -225,6 +225,7 @@ export class PmTelegramChannel implements ChannelConnector {
         chat_id: parseInt(message.channelId.accountId, 10),
         message_id: parseInt(message.messageId, 10),
         user_id: parseInt(message.sender.id, 10),
+        channelType: "telegram" as ChannelType,
       };
     }
 
@@ -239,6 +240,7 @@ export class PmTelegramChannel implements ChannelConnector {
       chat_id: parseInt(message.channelId.accountId, 10),
       message_id: parseInt(message.messageId, 10),
       user_id: parseInt(message.sender.id, 10),
+      channelType: "telegram" as ChannelType,
     };
   }
 

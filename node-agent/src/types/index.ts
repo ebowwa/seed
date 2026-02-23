@@ -421,6 +421,9 @@ export interface RalphErrorEvent extends MonitorEvent {
   };
 }
 
+// Channel Types
+export type ChannelType = "telegram" | "ssh" | "discord" | "slack" | "unknown";
+
 // Command Types
 export interface PmCommand {
   command: string;
@@ -429,6 +432,7 @@ export interface PmCommand {
   chat_id: number;
   message_id: number;
   user_id: number;
+  channelType: ChannelType;  // Which channel this message came from
 }
 
 export interface PmCommandResponse {

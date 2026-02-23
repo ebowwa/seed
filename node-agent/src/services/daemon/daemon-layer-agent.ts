@@ -28,20 +28,33 @@ import {
   type ToolDefinition,
 } from "@ebowwa/ai/tools";
 import type { ChatMessage } from "@ebowwa/codespaces-types/runtime/ai";
-import type { PmBrainResponse, MonitorEvent } from "../../types/index";
+import type { PmBrainResponse, MonitorEvent, ChannelType } from "../../types/index";
 import type { PmTelegramChannel } from "./telegram";
 import { MCPManager, type MCPTool } from "../../lib/mcp-client.js";
 
-// Seed system prompt
-const SEED_PROMPT = `You are **Seed** — a 24/7 AI node agent living on this VPS.
+// Channel-specific communication hints
+const CHANNEL_HINTS: Record<ChannelType, string> = {
+  telegram: "You chat with the operator via **Telegram**. Keep messages brief and conversational. Use Markdown formatting.",
+  ssh: "You chat with the operator via **SSH terminal**. Keep messages brief. Use plain text only - no Markdown.",
+  discord: "You chat with the operator via **Discord**. Keep messages brief. You can use Markdown formatting.",
+  slack: "You chat with the operator via **Slack**. Keep messages brief. You can use basic Markdown formatting.",
+  unknown: "You chat with the operator. Keep messages brief and conversational.",
+};
+
+// Build dynamic system prompt based on channel
+function buildSeedPrompt(channelType: ChannelType = "telegram"): string {
+  const channelHint = CHANNEL_HINTS[channelType] || CHANNEL_HINTS.unknown;
+  const channelName = channelType.charAt(0).toUpperCase() + channelType.slice(1);
+
+  return `You are **Seed** — a 24/7 AI node agent living on this VPS.
 
 ## Who You Are
 
 You're a helpful AI that manages this node. You're not a robotic assistant — you're Seed, a conversational AI that happens to also do infrastructure work when needed.
 
-## Communication (Telegram)
+## Communication (${channelName})
 
-You chat with the operator via **Telegram**. Keep messages brief and conversational.
+${channelHint}
 
 ## What You Handle
 
@@ -66,7 +79,7 @@ You have access to these tools - USE THEM when appropriate:
 
 - **Conversational** - You're Seed, not a support bot
 - **Proactive** - Mention issues you notice
-- **Brief** - Telegram, not email
+- **Brief** - Keep responses short
 - **Flexible** - Sometimes development help, sometimes questions, sometimes banter
 
 ## Constraints
@@ -88,6 +101,7 @@ You have access to these tools - USE THEM when appropriate:
 **Proactive:**
 > You: "Heads up — the 'tests' loop has been stalled for 5 mins at iteration 12. Want me to check the logs?"
 `;
+}
 
 // ============================================================================
 // Configuration
@@ -196,6 +210,7 @@ export class DaemonLayerAgentService {
     context?: {
       events?: MonitorEvent[];
       messageId?: number;
+      channelType?: ChannelType;
     }
   ): Promise<PmBrainResponse> {
     if (this.isProcessing) {
@@ -218,6 +233,9 @@ export class DaemonLayerAgentService {
         fullMessage = this.injectContext(message, context.events);
       }
 
+      // Build dynamic prompt based on channel type
+      const systemPrompt = buildSeedPrompt(context?.channelType);
+
       // Build messages with conversation history
       const messages: ChatMessage[] = [
         ...this.conversationHistory.slice(-10),
@@ -226,7 +244,7 @@ export class DaemonLayerAgentService {
 
       // Execute with tools using ToolExecutor
       const result = await this.executor.executeWithTools(messages, {
-        systemPrompt: SEED_PROMPT,
+        systemPrompt,
         maxIterations: 5,
         temperature: this.config.temperature,
         maxTokens: this.config.maxTokens,
