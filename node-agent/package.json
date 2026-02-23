@@ -1,6 +1,6 @@
 {
-  "name": "seed-node-agent",
-  "version": "0.6.2",
+  "name": "@ebowwa/node-agent",
+  "version": "0.6.3",
   "description": "Node Agent for Ralph Loop orchestration on VPS nodes",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,11 +30,11 @@
   ],
   "author": "Ebowwa Labs <labs@ebowwa.com>",
   "license": "MIT",
-  "homepage": "https://github.com/ebowwa/codespaces/tree/main/packages/src/seed/node-agent#readme",
+  "homepage": "https://github.com/ebowwa/codespaces/tree/main/packages/src/node-agent#readme",
   "repository": {
     "type": "git",
     "url": "https://github.com/ebowwa/codespaces.git",
-    "directory": "packages/src/seed/node-agent"
+    "directory": "packages/src/node-agent"
   },
   "bugs": {
     "url": "https://github.com/ebowwa/codespaces/issues"
@@ -48,7 +48,7 @@
     "@ebowwa/channel-telegram": "^1.14.2",
     "@ebowwa/channel-types": "^0.2.1",
     "@ebowwa/codespaces-types": "^1.6.1",
-    "@ebowwa/glm-daemon": "^0.4.7",
+    "@ebowwa/daemons": "^0.5.0",
     "@ebowwa/rolling-keys": "^0.1.1"
   },
   "devDependencies": {
