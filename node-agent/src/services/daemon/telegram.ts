@@ -11,16 +11,13 @@ import {
   TelegramChannel as BaseTelegramChannel,
   type TelegramConfig,
   createTelegramConfigFromEnv as baseCreateConfig,
-} from "@ebowwa/channel-telegram";
-
-import {
   type ChannelConnector,
   type ChannelId,
   type ChannelMessage,
   type ChannelResponse,
   type ChannelCapabilities,
   type MessageHandler,
-} from "@ebowwa/channel-types";
+} from "../channels";
 
 import type { PmCommand } from "../../types/index";
 
