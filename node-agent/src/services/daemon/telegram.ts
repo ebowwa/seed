@@ -102,6 +102,13 @@ export class PmTelegramChannel implements ChannelConnector {
   }
 
   async send(response: ChannelResponse): Promise<void> {
+    // For broadcasts (no valid replyTo), use allowedChatId
+    if (response.replyTo.messageId === "broadcast" && this.allowedChatId) {
+      await this.base.sendMessage(this.allowedChatId, response.content.text, {
+        parse_mode: response.content.options?.parseMode as "Markdown" | "HTML" | undefined,
+      });
+      return;
+    }
     await this.base.send(response);
   }
 
