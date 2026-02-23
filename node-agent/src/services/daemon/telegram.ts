@@ -1,10 +1,11 @@
 /**
- * Telegram Channel Adapter for Node Agent
+ * PM Telegram Channel Adapter
  *
  * Wraps @ebowwa/channel-telegram with PM daemon-specific functionality.
- * - Chat allowlist security (TELEGRAM_CHAT_ID)
+ * Delegates to base channel for core operations, adds:
  * - PM command parsing for Ralph loop management
- * - Integration with DaemonLayerAgent for AI responses
+ * - Convenience methods for single-chat operation
+ * - Connection testing and chat info
  */
 
 import {
@@ -25,7 +26,7 @@ import type { PmCommand, ChannelType } from "../../types/index";
 const TELEGRAM_CHAT_ID = parseInt(process.env.TELEGRAM_CHAT_ID || "", 10);
 
 /**
- * Extended Telegram config for PM daemon
+ * Extended Telegram config for PM daemon (single chat focus)
  */
 export interface PmTelegramConfig extends TelegramConfig {
   allowedChatId: number;
@@ -45,6 +46,7 @@ export function createPmTelegramConfigFromEnv(): PmTelegramConfig | null {
 
   return {
     ...baseConfig,
+    // Base channel handles allowlist enforcement
     allowedChats: allowedChatId ? [allowedChatId] : undefined,
     allowedChatId,
   };
@@ -53,92 +55,70 @@ export function createPmTelegramConfigFromEnv(): PmTelegramConfig | null {
 /**
  * PmTelegramChannel - Telegram channel with PM daemon extensions
  *
- * Wraps @ebowwa/channel-telegram with:
- * - Chat allowlist enforcement
- * - PM command parsing (/status, /loops, /start, /stop, /logs, /lanes, /health)
- * - Easy integration with DaemonLayerAgent
+ * Wraps base TelegramChannel, delegating core operations.
+ * Adds PM-specific convenience methods.
  */
 export class PmTelegramChannel implements ChannelConnector {
-  readonly id: ChannelId;
-  readonly label = "Telegram (PM Daemon)";
-  readonly capabilities: ChannelCapabilities = {
-    supports: {
-      text: true,
-      media: true,
-      replies: true,
-      threads: false,
-      reactions: true,
-      editing: true,
-      streaming: false,
-    },
-    media: {
-      maxFileSize: 50 * 1024 * 1024,
-      supportedMimeTypes: ["image/*", "video/*", "audio/*", "application/pdf"],
-    },
-    rateLimits: {
-      messagesPerMinute: 30,
-      charactersPerMessage: 4096,
-    },
-  };
-
-  private baseChannel: BaseTelegramChannel;
-  private config: PmTelegramConfig;
-  private connected = false;
-  private messageHandler?: MessageHandler;
+  private base: BaseTelegramChannel;
+  private allowedChatId: number | undefined;
 
   constructor(config?: PmTelegramConfig) {
-    // Allow no-arg constructor for backwards compatibility
     if (!config) {
-      const envConfig = createPmTelegramConfigFromEnv();
-      if (!envConfig) {
+      config = createPmTelegramConfigFromEnv() ?? undefined;
+      if (!config) {
         throw new Error("TELEGRAM_BOT_TOKEN is required");
       }
-      config = envConfig;
     }
-    this.config = config;
-    this.baseChannel = new BaseTelegramChannel(config);
-    this.id = this.baseChannel.id;
+    this.allowedChatId = config.allowedChatId;
+    this.base = new BaseTelegramChannel(config);
   }
 
   // ============================================================
-  // ChannelConnector Interface
+  // ChannelConnector Interface - delegate to base
   // ============================================================
 
+  get id(): ChannelId {
+    return this.base.id;
+  }
+
+  get label(): string {
+    return this.base.label;
+  }
+
+  get capabilities(): ChannelCapabilities {
+    return this.base.capabilities;
+  }
+
   async start(): Promise<void> {
-    // Set up message routing through our handler
-    this.baseChannel.onMessage(async (message) => {
-      // Enforce chat allowlist
-      if (!this.isAllowed(message)) {
-        console.log(`[PmTelegram] Ignoring message from non-allowed chat/user`);
-        return null;
-      }
-
-      // Route to our handler
-      if (this.messageHandler) {
-        return await this.messageHandler(message);
-      }
-      return null;
-    });
-
-    await this.baseChannel.start();
-    this.connected = true;
+    await this.base.start();
   }
 
   async stop(): Promise<void> {
-    await this.baseChannel.stop();
-    this.connected = false;
+    await this.base.stop();
   }
 
   onMessage(handler: MessageHandler): void {
-    this.messageHandler = handler;
+    this.base.onMessage(handler);
   }
 
   async send(response: ChannelResponse): Promise<void> {
-    await this.baseChannel.send(response);
+    await this.base.send(response);
   }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.base.isConnected();
+  }
+
+  // ============================================================
+  // Base Channel Access - for advanced operations
+  // ============================================================
+
+  getBot() {
+    return this.base.getBot();
+  }
+
+  getMemory() {
+    return this.base.getMemory();
   }
 
   // ============================================================
@@ -146,48 +126,25 @@ export class PmTelegramChannel implements ChannelConnector {
   // ============================================================
 
   /**
-   * Get the underlying TelegramBot instance for advanced operations
-   */
-  getBot() {
-    return this.baseChannel.getBot();
-  }
-
-  /**
-   * Get conversation memory
-   */
-  getMemory() {
-    return this.baseChannel.getMemory();
-  }
-
-  /**
-   * Start typing indicator
+   * Start typing indicator on allowed chat
    */
   startTyping(): void {
-    const chatId = this.config.allowedChatId;
-    if (chatId) {
-      this.baseChannel.startTypingIndicator(chatId);
+    if (this.allowedChatId) {
+      this.base.startTypingIndicator(this.allowedChatId);
     }
   }
 
   /**
-   * Stop typing indicator
+   * Stop typing indicator on allowed chat
    */
   stopTyping(): void {
-    const chatId = this.config.allowedChatId;
-    if (chatId) {
-      this.baseChannel.stopTypingIndicator(chatId);
+    if (this.allowedChatId) {
+      this.base.stopTypingIndicator(this.allowedChatId);
     }
   }
 
   /**
-   * Get the allowed chat ID
-   */
-  getAllowedChatId(): number | undefined {
-    return this.config.allowedChatId;
-  }
-
-  /**
-   * Send text message to the allowed chat
+   * Send text message to allowed chat (convenience method)
    */
   async sendText(
     text: string,
@@ -196,12 +153,10 @@ export class PmTelegramChannel implements ChannelConnector {
       reply_to_message_id?: number;
     }
   ): Promise<void> {
-    const chatId = this.config.allowedChatId;
-    if (!chatId) {
+    if (!this.allowedChatId) {
       throw new Error("No allowed chat ID configured");
     }
-
-    await this.baseChannel.sendMessage(chatId, text, {
+    await this.base.sendMessage(this.allowedChatId, text, {
       parse_mode: options?.parse_mode,
       reply_to_message_id: options?.reply_to_message_id,
     });
@@ -209,14 +164,12 @@ export class PmTelegramChannel implements ChannelConnector {
 
   /**
    * Parse a command from a ChannelMessage
-   * Returns PmCommand for PM-specific handling
    */
   parseCommand(message: ChannelMessage): PmCommand | null {
     const text = message.text || "";
     const parts = text.trim().split(/\s+/);
     const command = parts[0];
 
-    // Check if it's a command (starts with /)
     if (!command.startsWith("/")) {
       return {
         command: "chat",
@@ -229,13 +182,9 @@ export class PmTelegramChannel implements ChannelConnector {
       };
     }
 
-    // Extract command name (remove /)
-    const commandName = command.slice(1);
-    const args = parts.slice(1);
-
     return {
-      command: commandName,
-      args,
+      command: command.slice(1),
+      args: parts.slice(1),
       raw_text: text,
       chat_id: parseInt(message.channelId.accountId, 10),
       message_id: parseInt(message.messageId, 10),
@@ -253,8 +202,7 @@ export class PmTelegramChannel implements ChannelConnector {
     error?: string;
   }> {
     try {
-      const bot = this.getBot();
-      const me = await bot.getMe();
+      const me = await this.getBot().getMe();
       return {
         ok: true,
         bot: {
@@ -283,12 +231,10 @@ export class PmTelegramChannel implements ChannelConnector {
     firstName?: string;
     lastName?: string;
   } | null> {
-    const chatId = this.config.allowedChatId;
-    if (!chatId) return null;
+    if (!this.allowedChatId) return null;
 
     try {
-      const bot = this.getBot();
-      const chat = await bot.getChat(chatId);
+      const chat = await this.getBot().getChat(this.allowedChatId);
       return {
         id: chat.id,
         type: chat.type,
@@ -302,24 +248,9 @@ export class PmTelegramChannel implements ChannelConnector {
       return null;
     }
   }
-
-  /**
-   * Check if message is from allowed chat/user
-   */
-  private isAllowed(message: ChannelMessage): boolean {
-    // If no allowlist configured, allow all
-    if (!this.config.allowedChatId) {
-      return true;
-    }
-
-    const chatId = parseInt(message.channelId.accountId, 10);
-    const userId = parseInt(message.sender.id, 10);
-
-    return this.baseChannel.isAllowed(userId, chatId);
-  }
 }
 
-// Legacy export for backwards compatibility
+// Legacy export
 export { PmTelegramChannel as TelegramService };
 
 /**
