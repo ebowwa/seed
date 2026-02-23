@@ -1330,33 +1330,6 @@ async function startPmDaemon(): Promise<void> {
     await daemonLayerAgent.start();
     console.log(`[Seed] ✓ Seed brain running`);
 
-    // Get local hostname and chat info for startup message
-    const localHostname = await getHostname();
-    const chatInfo = await telegramService.getChatInfo();
-
-    // Build user display string
-    let userDisplay = "Unknown";
-    if (chatInfo) {
-      if (chatInfo.username) {
-        userDisplay = `@${chatInfo.username}`;
-      } else if (chatInfo.firstName) {
-        userDisplay = chatInfo.lastName
-          ? `${chatInfo.firstName} ${chatInfo.lastName}`
-          : chatInfo.firstName;
-      } else if (chatInfo.title) {
-        userDisplay = chatInfo.title; // Group chat
-      }
-    }
-
-    // Send startup notification (acknowledge the channel and user)
-    await telegramService.sendText(`🟢 *Seed Online*
-
-📱 *Channel:* Telegram
-👤 *User:* ${userDisplay}
-🖥️ *Node:* \`${localHostname}\`
-⏰ *Time:* ${new Date().toISOString()}
-`);
-
     // Recent events for context (circular buffer)
     const recentEvents: MonitorEvent[] = [];
     const MAX_RECENT_EVENTS = 10;
@@ -1485,9 +1458,7 @@ ${event.node_id}: ${warnings.join(", ")}
       console.log("[Seed] Stopping Seed brain session...");
       await daemonLayerAgent.stop();
 
-      await telegramService.sendText("🔴 Seed shutting down");
-
-      // Allow time for message to send
+      // Allow time for cleanup
       await new Promise((resolve) => setTimeout(resolve, 2000));
       process.exit(0);
     };
