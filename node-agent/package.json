@@ -1,6 +1,6 @@
 {
   "name": "seed-node-agent",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Node Agent for Ralph Loop orchestration on VPS nodes",
   "type": "module",
   "main": "./dist/index.js",

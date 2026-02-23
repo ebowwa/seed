@@ -1317,7 +1317,7 @@ async function startPmDaemon(): Promise<void> {
         serverName: localHostname,
         hostname: localHostname,
         packageName: "seed-node-agent",
-        version: "0.6.1",
+        version: "0.6.2",
         dependencies: [
           { name: "@ebowwa/channel-core", version: "^1.2.1" },
           { name: "@ebowwa/channel-telegram", version: "^1.14.2" },
