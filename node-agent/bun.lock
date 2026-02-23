@@ -6,6 +6,7 @@
       "name": "seed-node-agent",
       "dependencies": {
         "@ebowwa/ai": "^0.3.2",
+        "@ebowwa/channel-core": "^1.0.1",
         "@ebowwa/channel-telegram": "^1.13.7",
         "@ebowwa/channel-types": "^0.1.1",
         "@ebowwa/codespaces-types": "^1.6.0",
@@ -37,6 +38,8 @@
     "@discordjs/ws": ["@discordjs/ws@1.2.3", "", { "dependencies": { "@discordjs/collection": "^2.1.0", "@discordjs/rest": "^2.5.1", "@discordjs/util": "^1.1.0", "@sapphire/async-queue": "^1.5.2", "@types/ws": "^8.5.10", "@vladfrangu/async_event_emitter": "^2.2.4", "discord-api-types": "^0.38.1", "tslib": "^2.6.2", "ws": "^8.17.0" } }, "sha512-wPlQDxEmlDg5IxhJPuxXr3Vy9AjYq5xCvFWGJyD7w7Np8ZGu+Mc+97LCoEc/+AYCo2IDpKioiH0/c/mj5ZR9Uw=="],
 
     "@ebowwa/ai": ["@ebowwa/ai@0.3.2", "", { "dependencies": { "@ebowwa/codespaces-types": "^1.4.5", "@ebowwa/structured-prompts": "^0.3.2", "@modelcontextprotocol/sdk": "^1.0.0", "zod": "^3.24.0" } }, "sha512-rPfQ5Vo1eegcNFdnTCp5k4EfA3shQf9VtX1apoSWlQsTEgLY7iIuoZUui8uoWaUEdILkq+KEAlhbKuHApic/Ig=="],
+
+    "@ebowwa/channel-core": ["@ebowwa/channel-core@1.0.1", "", { "dependencies": { "@ebowwa/channel-types": ">=0.2.0" } }, "sha512-y/7giI+xSRC047sTUiM6qLzBX9vTDXep8cDxAUwwkd3SSayFHNl6/7q0jGdK0RZSV+Ue8yMuiShbQah8OlLDYw=="],
 
     "@ebowwa/channel-telegram": ["@ebowwa/channel-telegram@1.13.8", "", { "dependencies": { "@ebowwa/channel-types": "^0.1.1", "node-telegram-bot-api": "^0.66.0" } }, "sha512-Iwc7A6Q3EroiBCgCQRFgewx7uSyO20vlyrlTjeIo49U85kQnYz3jbP6mWj3gp/oDlIQOjTOMt64xcq645H9MZA=="],
 
@@ -575,6 +578,8 @@
     "@discordjs/ws/@discordjs/collection": ["@discordjs/collection@2.1.1", "", {}, "sha512-LiSusze9Tc7qF03sLCujF5iZp7K+vRNEDBZ86FT9aQAv3vxMLihUvKvpsCWiQ2DJq1tVckopKm1rxomgNUc9hg=="],
 
     "@ebowwa/ai/@ebowwa/codespaces-types": ["@ebowwa/codespaces-types@1.4.5", "", { "dependencies": { "zod": "^3.24.1" } }, "sha512-Q3DlC3rnpiCVtWpwOv3Q4r/Y3XCTSlFeuIAurBsPFQtK93J2/MTrSqHRkZEUKhiwiEUAHgRGgE7De3ysjnVFFw=="],
+
+    "@ebowwa/channel-core/@ebowwa/channel-types": ["@ebowwa/channel-types@0.2.1", "", {}, "sha512-teKqKGaTt7ZJu1+WmfMBfWAOSTf9PlslxOG7borehwPHE0eVAQYSGGJOgDQhxIBYQwCaj4KKl4LmRK5ImGZDCw=="],
 
     "@ebowwa/glm-daemon/@ebowwa/ai": ["@ebowwa/ai@0.3.1", "", { "dependencies": { "@ebowwa/codespaces-types": "^1.4.5", "@ebowwa/structured-prompts": "^0.3.2", "@modelcontextprotocol/sdk": "^1.0.0", "zod": "^3.24.0" } }, "sha512-xFimnrFYeHxVWUT5m7rJlu6XwhA+/xbbXaRfLzlKMLBs1POaIpfuuZLzk6mmpmS2FPZWSuWLSwwHYbQP1CSUyQ=="],
 
