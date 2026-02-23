@@ -273,6 +273,37 @@ export class PmTelegramChannel implements ChannelConnector {
   }
 
   /**
+   * Get info about the allowed chat/user
+   */
+  async getChatInfo(): Promise<{
+    id: number;
+    type: string;
+    title?: string;
+    username?: string;
+    firstName?: string;
+    lastName?: string;
+  } | null> {
+    const chatId = this.config.allowedChatId;
+    if (!chatId) return null;
+
+    try {
+      const bot = this.getBot();
+      const chat = await bot.getChat(chatId);
+      return {
+        id: chat.id,
+        type: chat.type,
+        title: chat.title,
+        username: chat.username,
+        firstName: chat.first_name,
+        lastName: chat.last_name,
+      };
+    } catch (error) {
+      console.error("[PmTelegram] Failed to get chat info:", error);
+      return null;
+    }
+  }
+
+  /**
    * Check if message is from allowed chat/user
    */
   private isAllowed(message: ChannelMessage): boolean {

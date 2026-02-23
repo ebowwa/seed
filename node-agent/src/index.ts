@@ -1330,13 +1330,29 @@ async function startPmDaemon(): Promise<void> {
     await daemonLayerAgent.start();
     console.log(`[Seed] ✓ Seed brain running`);
 
-    // Get local hostname for startup message
+    // Get local hostname and chat info for startup message
     const localHostname = await getHostname();
+    const chatInfo = await telegramService.getChatInfo();
 
-    // Send startup notification (acknowledge the channel)
+    // Build user display string
+    let userDisplay = "Unknown";
+    if (chatInfo) {
+      if (chatInfo.username) {
+        userDisplay = `@${chatInfo.username}`;
+      } else if (chatInfo.firstName) {
+        userDisplay = chatInfo.lastName
+          ? `${chatInfo.firstName} ${chatInfo.lastName}`
+          : chatInfo.firstName;
+      } else if (chatInfo.title) {
+        userDisplay = chatInfo.title; // Group chat
+      }
+    }
+
+    // Send startup notification (acknowledge the channel and user)
     await telegramService.sendText(`🟢 *Seed Online*
 
 📱 *Channel:* Telegram
+👤 *User:* ${userDisplay}
 🖥️ *Node:* \`${localHostname}\`
 ⏰ *Time:* ${new Date().toISOString()}
 `);
