@@ -37,24 +37,145 @@ cd seed
 | **Claude Code** | AI coding assistant |
 | **GitHub CLI** | GitHub from terminal |
 | **Doppler** | Secrets management |
-| **Tailscale** | Zero-config VPN |
 | **OrbStack** | Fast Docker & Linux VMs (macOS) |
 | **Vision MCP** | Image/video analysis (Z.ai) |
 | **Web Search MCP** | Real-time web search (Z.ai) |
 | **GitHub MCP** | Repository intelligence |
 | **chat.sh** | Persistent Claude conversations |
+| **Ralph Iterative** | "Mr. Meeseeks Mode" - Autonomous AI loops |
+| **Node Agent** | Multi-node Ralph orchestration (port 8911) |
+
+## Ralph Iterative - "Mr. Meeseeks Mode"
+
+Ralph Iterative is a Claude Code plugin that relentlessly iterates on tasks until completion.
+
+**Quick Start:**
+
+```bash
+# Install Ralph Iterative (runs automatically during setup)
+./setup-ralph-iterative.sh
+
+# Run a Ralph loop
+doppler run --project seed --config prd -- claude '/go "Fix the authentication bug" --completion-promise BUG_FIXED' -p
+
+# Check status
+doppler run --project seed --config prd -- claude '/ralph-iterative-status' -p
+
+# Stop a loop
+doppler run --project seed --config prd -- claude '/quit' -p
+```
+
+**Key Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `/go` | Start Ralph loop |
+| `/quit` | Stop active loop |
+| `/ralph-iterative-status` | Show session status |
+| `/ralph-iterative-history` | Show session history |
+| `/ralph-iterative-resume` | Resume a session |
+
+**Features:**
+- ✅ Loops indefinitely until completion signal
+- ✅ Tracks state in `.claude/.ralph-iterative.local.json`
+- ✅ Monitored by Node Agent (GUI dashboard)
+- ✅ SLAM subagents (planner, executor, paranoid, reviewer)
+- ✅ Git integration (auto-commit, PRs)
+
+📖 **Full Documentation:** [RALPH-ITERATIVE-SETUP.md](./RALPH-ITERATIVE-SETUP.md)
+
+## Multi-Node Setup
+
+### Node Architecture
+
+```
+Coordinator Node (seed-node-prod)
+├── PM Daemon: Orchestrates work across nodes
+└── Node Agent API: :8911
+
+Worker Nodes (seed-node-1, seed-node-2, ...)
+├── Node Agent: Executes assigned tasks
+└── Ralph Iterative: Runs autonomous loops
+```
+
+### Quick Setup for New Nodes
+
+```bash
+# 1. Bootstrap script (coming soon)
+curl -fsSL https://raw.githubusercontent.com/ebowwa/seed/main/bootstrap-node.sh | bash
+
+# 2. Manual setup
+git clone https://github.com/ebowwa/seed.git
+cd seed
+./setup.sh
+
+# 3. Register with coordinator
+curl -X POST http://100.71.68.25:8911/api/nodes/register \
+  -H "Content-Type: application/json" \
+  -d '{"node_name": "seed-node-1", "role": "worker"}'
+```
+
+### Node Management
+
+```bash
+# Check node health
+curl http://localhost:8911/api/health
+
+# List all nodes
+curl http://localhost:8911/api/nodes
+
+# Submit work to node
+curl -X POST http://localhost:8911/api/ralph/start \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Fix the authentication bug", "target_node": "seed-node-1"}'
+```
+
+📖 **Full Documentation:** [NODE-SETUP-GUIDE.md](./NODE-SETUP-GUIDE.md)
 
 ## Configuration
 
-### Environment Variables
+### Secrets Management (Doppler)
+
+All secrets are managed via [Doppler](https://doppler.com) - no hardcoded tokens in `.env` files.
 
 ```bash
-# .env file
-AI_ASSISTANT=zai
-ZAI_API_KEY=your-key
-GITHUB_TOKEN=ghp_xxx
-DOPPLER_TOKEN=dp.st.xxx
-TAILSCALE_AUTH_KEY=tskey-xxx
+# Install and login
+brew install doppler-cli  # macOS
+# or
+curl -sL https://cli.doppler.com/install.sh | sh  # Linux
+doppler login
+
+# Setup project
+doppler setup  # Creates seed project with dev/prd configs
+
+# Run any command with secrets injected
+doppler run --project seed --config prd -- <your-command>
+
+# View secrets
+doppler secrets download --no-mask --project seed --config prd
+```
+
+**Required Secrets in Doppler:**
+
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `AI_ASSISTANT` | Claude provider | `zai` |
+| `ZAI_API_KEY` | Z.ai API key | `zai_xxx` |
+| `GITHUB_TOKEN` | GitHub Personal Access Token | `ghp_xxx` |
+| `DOPPLER_TOKEN` | Doppler service token | `dp.st.xxx` |
+| `TAILSCALE_AUTH_KEY` | Tailscale auth key | `tskey-xxx` |
+
+### Git Credential Helper
+
+Git is configured to fetch tokens from Doppler automatically:
+
+```bash
+# Credential helper is installed by setup.sh
+# Uses Doppler GITHUB_TOKEN for all GitHub operations
+git config --global credential.helper /root/.git-credentials-doppler
+
+# No need to set credentials manually
+git clone https://github.com/ebowwa/seed.git  # Just works
 ```
 
 ## Environments
@@ -66,6 +187,21 @@ TAILSCALE_AUTH_KEY=tskey-xxx
 | **Local Dev** | All tools |
 
 ## Post-Installation
+
+### Doppler Setup
+
+```bash
+# Login to Doppler (one-time)
+doppler login
+
+# Configure project (already set up for seed)
+doppler setup --project seed --config prd
+
+# Verify secrets are accessible
+doppler run --project seed --config prd -- env | grep -E "(ZAI|GITHUB|DOPPLER|TAILSCALE)"
+```
+
+### GitHub Credentials
 
 ```bash
 # GitHub CLI
@@ -134,6 +270,7 @@ ssh ebowwa-deptwar "cd ~/seed && ./chat.sh 'your prompt'"
 
 ## Docs
 
+- [Ralph Iterative Setup](./RALPH-ITERATIVE-SETUP.md)
 - [Claude Code Skills](./docs/Claude_Code_Skills.md)
 - [GLM Models Comparison](./docs/GLM_Models_Comparison.md)
 - [GitHub MCP Integration](./docs/GitHub_MCP_Integration.md)

@@ -150,30 +150,177 @@ async function main() {
 
   const timings: Array<{ name: string; ms: number; status: string }> = [];
 
-  for (const tool of toolsToInstall) {
-    if (options.dryRun) {
-      log("dry-run", `Would install: ${tool.name}`);
-      continue;
-    }
+  // ============================================================================
+  // 4-PHASE PARALLEL INSTALLATION STRATEGY
+  // ============================================================================
+  // Phase 1: curl-based installers (claude, doppler) - no dependencies
+  // Phase 2: bun (verification only, script runs on it)
+  // Phase 3: bun-dependent tools (lane, node-agent) - require bun for build
+  // Phase 4: apt-based tools (node, tmux, gh) - serial due to dpkg lock
+  // ============================================================================
 
-    const toolStart = performance.now();
+  const curlTools = toolsToInstall.filter((t) =>
+    ["claude", "doppler"].includes(t.name)
+  );
+  const bunTool = toolsToInstall.find((t) => t.name === "bun");
+  const bunDependentTools = toolsToInstall.filter((t) =>
+    ["lane", "node-agent", "ralph"].includes(t.name)
+  );
+  const aptTools = toolsToInstall.filter((t) =>
+    ["node", "tmux", "gh"].includes(t.name)
+  );
 
-    try {
-      log("info", `Installing ${tool.name}...`);
-      await tool.install(env);
-      const toolEnd = performance.now();
-      const toolMs = Math.round(toolEnd - toolStart);
-      timings.push({ name: tool.name, ms: toolMs, status: "✓" });
-      log("success", `${tool.name} installed (${toolMs}ms)`);
-    } catch (error) {
-      const toolEnd = performance.now();
-      const toolMs = Math.round(toolEnd - toolStart);
-      timings.push({ name: tool.name, ms: toolMs, status: "✗" });
-      log("error", `${tool.name} failed: ${error}`);
-      if (!options.force) {
-        throw error;
+  // Helper function to run tools in parallel
+  const runToolsParallel = async (tools: Tool[]): Promise<Array<{ name: string; ms: number; status: string }>> => {
+    if (tools.length === 0) return [];
+
+    // Filter out already installed tools
+    const toolsToInstall: Tool[] = [];
+    const alreadyInstalled: Tool[] = [];
+
+    for (const tool of tools) {
+      if (await tool.checkInstalled(env)) {
+        log("info", `✓ ${tool.name} already installed, skipping`);
+        alreadyInstalled.push(tool);
+      } else {
+        toolsToInstall.push(tool);
       }
     }
+
+    // Add already installed to timings with 0ms
+    const installedResults = alreadyInstalled.map(t => ({ name: t.name, ms: 0, status: "⊘" }));
+
+    if (toolsToInstall.length === 0) return installedResults;
+
+    if (options.dryRun) {
+      for (const tool of toolsToInstall) {
+        log("dry-run", `Would install: ${tool.name}`);
+      }
+      return [...installedResults, ...toolsToInstall.map(t => ({ name: t.name, ms: 0, status: "○" }))];
+    }
+
+    const startTimes = new Map(toolsToInstall.map((t) => [t.name, performance.now()]));
+
+    const installPromises = toolsToInstall.map(async (tool) => {
+      try {
+        log("info", `Installing ${tool.name}...`);
+        await tool.install(env);
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
+        return { name: tool.name, ms: toolMs, status: "✓" };
+      } catch (error) {
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - startTimes.get(tool.name)!);
+        const result = { name: tool.name, ms: toolMs, status: "✗" };
+        log("error", `${tool.name} failed: ${error}`);
+        if (!options.force) {
+          throw error;
+        }
+        return result;
+      }
+    });
+
+    const results = await Promise.all(installPromises);
+
+    for (const result of results) {
+      if (result.status === "✓") {
+        log("success", `${result.name} installed (${result.ms}ms)`);
+      }
+    }
+
+    return [...installedResults, ...results];
+  };
+
+  // Helper function to run tools serially
+  const runToolsSerial = async (tools: Tool[]): Promise<Array<{ name: string; ms: number; status: string }>> => {
+    const results: Array<{ name: string; ms: number; status: string }> = [];
+
+    for (const tool of tools) {
+      // Skip if already installed
+      if (await tool.checkInstalled(env)) {
+        log("info", `✓ ${tool.name} already installed, skipping`);
+        results.push({ name: tool.name, ms: 0, status: "⊘" });
+        continue;
+      }
+
+      if (options.dryRun) {
+        log("dry-run", `Would install: ${tool.name}`);
+        results.push({ name: tool.name, ms: 0, status: "○" });
+        continue;
+      }
+
+      const toolStart = performance.now();
+      try {
+        log("info", `Installing ${tool.name}...`);
+        await tool.install(env);
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - toolStart);
+        results.push({ name: tool.name, ms: toolMs, status: "✓" });
+        log("success", `${tool.name} installed (${toolMs}ms)`);
+      } catch (error) {
+        const toolEnd = performance.now();
+        const toolMs = Math.round(toolEnd - toolStart);
+        results.push({ name: tool.name, ms: toolMs, status: "✗" });
+        log("error", `${tool.name} failed: ${error}`);
+        if (!options.force) {
+          throw error;
+        }
+      }
+    }
+
+    return results;
+  };
+
+  // ============================================================================
+  // PHASE 1: curl-based installers (no dependencies)
+  // Tools: claude, doppler
+  // ============================================================================
+  if (curlTools.length > 0) {
+    const phaseStart = performance.now();
+    log("info", `Phase 1: Installing ${curlTools.length} curl-based tools in parallel...`);
+    const results = await runToolsParallel(curlTools);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 1 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
+  }
+
+  // ============================================================================
+  // PHASE 2: bun (verification only)
+  // Tools: bun
+  // ============================================================================
+  if (bunTool) {
+    const phaseStart = performance.now();
+    log("info", `Phase 2: Verifying bun...`);
+    const results = await runToolsSerial([bunTool]);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 2 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
+  }
+
+  // ============================================================================
+  // PHASE 3: bun-dependent tools (require bun for build/install)
+  // Tools: lane, node-agent, ralph
+  // ============================================================================
+  if (bunDependentTools.length > 0) {
+    const phaseStart = performance.now();
+    log("info", `Phase 3: Installing ${bunDependentTools.length} bun-dependent tools in parallel...`);
+    const results = await runToolsParallel(bunDependentTools);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 3 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
+  }
+
+  // ============================================================================
+  // PHASE 4: apt-based tools (serial due to dpkg lock)
+  // Tools: node, tmux, gh
+  // ============================================================================
+  if (aptTools.length > 0) {
+    const phaseStart = performance.now();
+    log("info", `Phase 4: Installing ${aptTools.length} apt-based tools serially...`);
+    const results = await runToolsSerial(aptTools);
+    timings.push(...results);
+    const phaseEnd = performance.now();
+    log("success", `Phase 4 complete (${Math.round(phaseEnd - phaseStart)}ms)`);
   }
 
   // Run health check
@@ -260,8 +407,38 @@ function log(
 }
 
 async function configureBunPath() {
+  const bunPath = `${process.env.HOME}/.bun/bin`;
+  const pathLine = `export PATH="${bunPath}:$PATH"`;
+
+  // Map shells to their config files
+  const shellConfigs: Record<string, string[]> = {
+    zsh: [`${process.env.HOME}/.zshrc`],
+    bash: [
+      `${process.env.HOME}/.bashrc`,
+      `${process.env.HOME}/.bash_profile`,
+    ],
+    sh: [`${process.env.HOME}/.profile`],
+  };
+
+  // Detect current shell and build config priority list
+  const currentShell = process.env.SHELL?.split("/").pop() || "bash";
+  const priorityConfigs = shellConfigs[currentShell] || shellConfigs.bash;
+
+  // Add fallback configs (ones not in priority list)
+  const allFallbackConfigs: string[] = [];
+  for (const configs of Object.values(shellConfigs)) {
+    for (const config of configs) {
+      if (!priorityConfigs.includes(config)) {
+        allFallbackConfigs.push(config);
+      }
+    }
+  }
+
+  const allConfigs = [...priorityConfigs, ...allFallbackConfigs];
+
+  // First, try /etc/environment (system-wide, requires sudo)
   const envFile = "/etc/environment";
-  const bunPath = "/.bun/bin";
+  let configured = false;
 
   try {
     const content = await Bun.file(envFile).text();
@@ -270,8 +447,7 @@ async function configureBunPath() {
       return;
     }
   } catch {
-    log("info", "Could not read /etc/environment (may not exist or no permission)");
-    return;
+    // /etc/environment not readable, try shell configs
   }
 
   try {
@@ -279,8 +455,45 @@ async function configureBunPath() {
     const updated = content.trim() + `\nPATH="${bunPath}:$PATH"\n`;
     await Bun.write(envFile, updated);
     log("success", `Added bun PATH to ${envFile}`);
+    configured = true;
   } catch {
-    log("warning", `Could not write to ${envFile} (permission denied)`);
+    // No sudo or write failed, continue to shell configs
+  }
+
+  // If system-wide failed, try shell config files
+  if (!configured) {
+    for (const configPath of allConfigs) {
+      try {
+        // Check if file exists
+        const existsProc = Bun.spawn(["test", "-f", configPath], {
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+        const exitCode = await existsProc.exited;
+
+        let content = "";
+        if (exitCode === 0) {
+          content = await Bun.file(configPath).text();
+          // Check if already configured
+          if (content.includes(bunPath)) {
+            log("info", `Bun PATH already configured in ${configPath}`);
+            return;
+          }
+        }
+
+        // Append PATH configuration
+        const updated = content.trim() + `\n${pathLine}\n`;
+        await Bun.write(configPath, updated);
+        log("success", `Added bun PATH to ${configPath}`);
+        return;
+      } catch {
+        // Try next config file
+        continue;
+      }
+    }
+
+    log("warning", "Could not configure bun PATH in any shell config");
+    log("info", `Add this to your shell config: export PATH="${bunPath}:$PATH"`);
   }
 }
 

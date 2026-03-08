@@ -1,6 +1,6 @@
 /**
  * Lane CLI Tool Installer
- * Clones and installs lane from the bun-migration branch
+ * Installs lane from npm using bun
  */
 
 import type { Environment } from "../env/detect";
@@ -10,10 +10,8 @@ export class LaneTool extends BaseTool {
   name = "lane";
   description = "Lane CLI - Git worktree alternative for parallel development";
 
-  // Lane repository configuration
-  readonly REPO_URL = "https://github.com/ebowwa/lane.git";
-  readonly BRANCH = "bun-migration";
-  readonly CLONE_DIR = "~/lane";
+  // NPM package configuration
+  readonly NPM_PACKAGE = "@ebowwa/lane";
 
   async isApplicable(env: Environment): Promise<boolean> {
     // Lane is useful for all environments where git work is done
@@ -27,94 +25,42 @@ export class LaneTool extends BaseTool {
 
   async install(env: Environment): Promise<void> {
     const ctx = this.getContext(env);
-    const cloneDir = ctx.homeDir + "/lane";
+    const installDir = ctx.homeDir + "/.lane-install";
 
-    console.log(`  Installing ${this.name} from ${this.REPO_URL} (${this.BRANCH} branch)...`);
+    console.log(`  Installing ${this.name} from npm (${this.NPM_PACKAGE})...`);
 
-    // Check if lane directory already exists
-    try {
-      const { execSync } = await import("child_process");
-      const exists = execSync(`test -d ${cloneDir} && echo "exists" || echo "not"`, {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-      }).trim();
+    // Create temp install directory
+    await this.exec(["mkdir", "-p", installDir]);
 
-      if (exists === "exists") {
-        console.log(`  ✓ ${this.name} already cloned at ${cloneDir}`);
-        console.log(`  → Updating to latest from ${this.BRANCH}...`);
-
-        // Fetch and checkout the correct branch
-        await this.exec(
-          ["git", "-C", cloneDir, "fetch", "origin"],
-          { cwd: cloneDir }
-        );
-        await this.exec(
-          ["git", "-C", cloneDir, "checkout", this.BRANCH],
-          { cwd: cloneDir }
-        );
-        await this.exec(
-          ["git", "-C", cloneDir, "pull", "origin", this.BRANCH],
-          { cwd: cloneDir }
-        );
-      } else {
-        // Clone the repository
-        console.log(`  → Cloning to ${cloneDir}...`);
-        await this.exec(
-          ["git", "clone", "-b", this.BRANCH, this.REPO_URL, cloneDir],
-          { cwd: ctx.homeDir }
-        );
-      }
-    } catch (error) {
-      throw new Error(`Failed to clone lane: ${error}`);
-    }
-
-    // Install dependencies
-    console.log(`  → Installing dependencies...`);
+    // Install package with bun
+    console.log(`  → Running: bun install ${this.NPM_PACKAGE}...`);
     const installProc = Bun.spawn(
-      ["bun", "install"],
+      ["bun", "install", this.NPM_PACKAGE],
       {
-        cwd: cloneDir,
+        cwd: installDir,
         stdout: "inherit",
         stderr: "inherit",
       }
     );
 
-    const installExitCode = await installProc.exited;
-    if (installExitCode !== 0) {
-      throw new Error(`Failed to install lane dependencies`);
+    const exitCode = await installProc.exited;
+    if (exitCode !== 0) {
+      throw new Error(`Failed to install ${this.name} from npm`);
     }
 
-    // Build lane
-    console.log(`  → Building ${this.name}...`);
-    const buildProc = Bun.spawn(
-      ["bun", "run", "build"],
-      {
-        cwd: cloneDir,
-        stdout: "inherit",
-        stderr: "inherit",
-      }
-    );
+    // Create symlink to ~/.local/bin
+    console.log(`  → Creating symlink to ~/.local/bin/lane...`);
+    const binDir = ctx.homeDir + "/.local/bin";
+    await this.exec(["mkdir", "-p", binDir]);
 
-    const buildExitCode = await buildProc.exited;
-    if (buildExitCode !== 0) {
-      throw new Error(`Failed to build lane`);
-    }
+    const symlinkPath = binDir + "/lane";
+    const targetPath = installDir + "/node_modules/.bin/lane";
 
-    // Install globally via bun
-    console.log(`  → Installing ${this.name} globally...`);
-    const globalInstallProc = Bun.spawn(
-      ["bun", "install", "-g", "."],
-      {
-        cwd: cloneDir,
-        stdout: "inherit",
-        stderr: "inherit",
-      }
-    );
+    // Remove existing symlink if it exists
+    await this.exec(["rm", "-f", symlinkPath]);
 
-    const globalExitCode = await globalInstallProc.exited;
-    if (globalExitCode !== 0) {
-      throw new Error(`Failed to install lane globally`);
-    }
+    // Create new symlink
+    await this.exec(["ln", "-s", targetPath, symlinkPath]);
 
     // Set up shell completion
     console.log(`  → Setting up shell integration...`);
@@ -128,6 +74,6 @@ export class LaneTool extends BaseTool {
       console.log(`  ⚠ Shell integration skipped (you can run 'lane init-shell' manually)`);
     }
 
-    console.log(`  ✓ ${this.name} installed from ${this.BRANCH} branch`);
+    console.log(`  ✓ ${this.name} installed from ${this.NPM_PACKAGE}`);
   }
 }

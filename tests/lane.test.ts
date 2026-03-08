@@ -51,12 +51,8 @@ describe("LaneTool", () => {
       );
     });
 
-    test("should have correct repo URL", () => {
-      expect((laneTool as any).REPO_URL).toBe("https://github.com/ebowwa/lane.git");
-    });
-
-    test("should target bun-migration branch", () => {
-      expect((laneTool as any).BRANCH).toBe("bun-migration");
+    test("should use npm package", () => {
+      expect((laneTool as any).NPM_PACKAGE).toBe("@ebowwa/lane");
     });
   });
 
@@ -96,52 +92,9 @@ describe("LaneTool", () => {
     });
   });
 
-  describe("install", () => {
-    test("should clone repo to ~/lane", async () => {
-      const cloneDir = `${mockEnv.homeDir}/lane`;
-
-      // Mock the exec method
-      let capturedCmd: string[] | null = null;
-      laneTool.exec = async (cmd: string[]) => {
-        capturedCmd = cmd;
-        return { stdout: "", stderr: "", exitCode: 0 };
-      };
-
-      // Mock Bun.spawn
-      const originalSpawn = Bun.spawn;
-      let spawnArgs: any[] = [];
-      Bun.spawn = function (args: any) {
-        spawnArgs.push(args);
-        return originalSpawn(args);
-      };
-
-      try {
-        await laneTool.install(mockEnv);
-
-        // Verify git clone command
-        expect(capturedCmd).toContain("git");
-        expect(capturedCmd).toContain("clone");
-        expect(capturedCmd).toContain("-b");
-        expect(capturedCmd).toContain("bun-migration");
-        expect(capturedCmd).toContain((laneTool as any).REPO_URL);
-        expect(capturedCmd).toContain(cloneDir);
-      } finally {
-        Bun.spawn = originalSpawn;
-      }
-    });
-
-    test("should use correct branch name", async () => {
-      expect((laneTool as any).BRANCH).toBe("bun-migration");
-    });
-  });
-
-  describe("repository configuration", () => {
-    test("should use ebowwa/lane repo", () => {
-      expect((laneTool as any).REPO_URL).toBe("https://github.com/ebowwa/lane.git");
-    });
-
-    test("should clone to home directory", () => {
-      expect((laneTool as any).CLONE_DIR).toBe("~/lane");
+  describe("npm package configuration", () => {
+    test("should use @ebowwa/lane package", () => {
+      expect((laneTool as any).NPM_PACKAGE).toBe("@ebowwa/lane");
     });
   });
 });

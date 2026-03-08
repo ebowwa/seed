@@ -25,9 +25,11 @@ export class NodeAgentTool extends BaseTool {
     // TINKER: Multi-location path detection
     // Original: Only checked ${ctx.homeDir}/seed
     // Issue: Codespaces uses /workspaces/seed, not ~/seed
-    // Solution: Try multiple common locations
+    // Issue: process.cwd() is v2, need to check parent for node-agent
+    // Solution: Try multiple common locations including parent of cwd
     const possiblePaths = [
-      process.cwd(),                    // Current directory
+      process.cwd(),                    // Current directory (might be v2)
+      `${process.cwd()}/..`,            // Parent of current directory
       `${ctx.homeDir}/seed`,            // ~/seed
       `/workspaces/seed`,               // Codespaces
       `/home/${process.env.USER}/seed`, // Linux home
@@ -37,10 +39,18 @@ export class NodeAgentTool extends BaseTool {
     let agentPath = "";
 
     for (const path of possiblePaths) {
-      const testPath = `${path}/node-agent`;
+      // Resolve relative paths to absolute paths
+      let resolvedPath = path;
+      if (path === "." || path === "./" || path.startsWith("..") || !path.startsWith("/")) {
+        // Use realpath to resolve relative paths to absolute
+        const { stdout } = await this.exec(["realpath", path]);
+        resolvedPath = stdout.trim();
+      }
+
+      const testPath = `${resolvedPath}/node-agent`;
       const { exitCode } = await this.exec(["test", "-d", testPath]);
       if (exitCode === 0) {
-        seedPath = path;
+        seedPath = resolvedPath;
         agentPath = testPath;
         break;
       }
@@ -52,17 +62,8 @@ export class NodeAgentTool extends BaseTool {
       return;
     }
 
-    // Prompt in interactive mode
-    const shouldInstall = await this.prompt(
-      `Install ${this.name}? (Ralph Loop orchestration API server)`
-    );
-
-    if (!shouldInstall) {
-      console.log(`  ⊘ Skipping ${this.name}`);
-      return;
-    }
-
-    console.log(`  Installing ${this.name}...`);
+    // Auto-install node-agent (always yes)
+    console.log(`  ✓ Auto-installing ${this.name}...`);
 
     // Install dependencies
     console.log(`  → Installing dependencies...`);
@@ -135,118 +136,73 @@ WRAPPER_EOF`
 
     console.log(`  ✓ ${this.name} installed to ${binPath}`);
 
-    // Run node-agent after installation
+    // Start the service (without systemd for containers)
     console.log(`  → Starting ${this.name}...`);
 
-    if (env.type === "vps" || env.type === "container") {
-      // On VPS/container, use systemd if available
-      const serviceFile = `${agentPath}/systemd/node-agent.service`;
-      const { exitCode: serviceExists } = await this.exec(["test", "-f", serviceFile]);
+    // Check if systemd is available
+    const { exitCode: systemctlExit } = await this.exec(
+      ["which", "systemctl"],
+      { stdout: "pipe", stderr: "pipe" }
+    );
 
-      if (serviceExists === 0) {
-        // Set up systemd service
-        const systemdDir = "/etc/systemd/system";
-        const serviceUser = env.isRoot ? "root" : process.env.USER || "root";
-
-        // Copy and configure service file
-        await this.exec([
-          "sudo", "cp", serviceFile, `${systemdDir}/node-agent.service`
-        ]);
-        await this.exec([
-          "sudo", "sed", "-i", `s/User=ubuntu/User=${serviceUser}/g`,
-          `${systemdDir}/node-agent.service`
-        ]);
-        await this.exec([
-          "sudo", "sed", "-i", `s|/home/ubuntu/|/home/${serviceUser}/|g`,
-          `${systemdDir}/node-agent.service`
-        ]);
-
-        // Create required directories
-        const basePath = env.isRoot ? "/root" : `/home/${serviceUser}`;
-        await this.exec(["sudo", "mkdir", "-p", `${basePath}/repos`]);
-        await this.exec(["sudo", "mkdir", "-p", `${basePath}/.node-agent/pids`]);
-        await this.exec(["sudo", "mkdir", "-p", `${basePath}/.node-agent/logs`]);
-
-        // Set ownership
-        if (!env.isRoot) {
-          await this.exec(["sudo", "chown", "-R", `${serviceUser}:${serviceUser}`, basePath]);
-        }
-
-        // Reload and start service
-        await this.exec(["sudo", "systemctl", "daemon-reload"]);
-        await this.exec(["sudo", "systemctl", "enable", "node-agent.service"]);
-        await this.exec(["sudo", "systemctl", "start", "node-agent.service"]);
-
-        console.log(`  ✓ ${this.name} running as systemd service`);
-      } else {
-        // No systemd service file, run directly
-        await this.runDirectly(agentPath);
-      }
+    if (systemctlExit === 0) {
+      // Use systemd service
+      console.log(`  → ${this.name} will be started by systemd (managed by setup.sh)`);
     } else {
-      // Local dev - run in background
-      await this.runDirectly(agentPath);
-    }
-  }
+      // Start directly (for containers without systemd)
+      const logPath = `${agentPath}/node-agent.log`;
+      const pidPath = `${agentPath}/node-agent.pid`;
 
-  private async runDirectly(agentPath: string): Promise<void> {
-    // TINKER: Check if port already in use before spawning
-    // Issue: EADDRINUSE error when trying to start second instance
-    // Solution: Check port 8911 with lsof/netstat before starting
-    const { exitCode: portCheck } = await this.exec([
-      "sh", "-c",
-      "lsof -i :8911 >/dev/null 2>&1 || netstat -an | grep LISTEN | grep \\.8911 >/dev/null 2>&1"
-    ]);
+      // Check if already running
+      const { exitCode: pidCheckExit } = await this.exec(
+        ["test", "-f", pidPath],
+        { stdout: "pipe", stderr: "pipe" }
+      );
 
-    if (portCheck === 0) {
-      console.log(`  ✓ ${this.name} already running on port 8911`);
-      return;
-    }
+      if (pidCheckExit === 0) {
+        // Check if process is still alive
+        const { stdout: pid } = await this.exec(["cat", pidPath]);
+        const { exitCode: killExit } = await this.exec(
+          ["kill", "-0", pid.trim()],
+          { stdout: "pipe", stderr: "pipe" }
+        );
 
-    // TINKER: Platform-specific daemonization
-    // Issue: macOS doesn't have setsid, Linux does
-    // Solution: Use nohup on macOS, setsid on Linux, both with detached
-    const logFile = `${agentPath}/node-agent.log`;
-    const isMac = process.platform === "darwin";
+        if (killExit === 0) {
+          console.log(`  ✓ ${this.name} already running (PID: ${pid.trim()})`);
+          console.log(`  → logs: ${logPath}`);
+          return;
+        }
+      }
 
-    // macOS: nohup with detached, Linux: setsid with detached
-    const startCmd = isMac
-      ? `cd "${agentPath}" && nohup bun run src/index.ts >> "${logFile}" 2>&1 &`
-      : `cd "${agentPath}" && setsid bun run src/index.ts >> "${logFile}" 2>&1 &`;
-
-    const proc = Bun.spawn(["sh", "-c", startCmd], {
-      cwd: agentPath,
-      stdout: "pipe",
-      stderr: "pipe",
-      detached: true,
-    });
-
-    // Don't wait for proc - it's backgrounded
-    proc.unref();
-
-    // Wait for process to start and open port
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Verify it's actually running
-    const { exitCode: verifyCheck } = await this.exec([
-      "sh", "-c",
-      "lsof -i :8911 >/dev/null 2>&1 || netstat -an | grep LISTEN | grep \\.8911 >/dev/null 2>&1"
-    ]);
-
-    if (verifyCheck !== 0) {
-      console.log(`  ✗ ${this.name} failed to start`);
-      // Show last 10 lines of log
-      try {
-        const tailProc = Bun.spawn(["tail", "-n", "10", logFile], {
+      // Start in background with nohup
+      const startProc = Bun.spawn(
+        ["nohup", "bun", "run", "src/index.ts"],
+        {
+          cwd: agentPath,
           stdout: "pipe",
           stderr: "pipe",
-        });
-        const logOutput = await new Response(tailProc.stdout).text();
-        await tailProc.exited;
-        console.log(`  Log output:\n${logOutput.split("\n").map(l => "    " + l).join("\n")}`);
-      } catch {}
-      return;
-    }
+          env: {
+            ...process.env,
+            NODE_AGENT_LOG_PATH: logPath,
+            NODE_AGENT_PID_PATH: pidPath,
+          },
+        }
+      );
 
-    console.log(`  ✓ ${this.name} started and listening on port 8911 (logs: ${logFile})`);
+      // Wait a bit and check if it started
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Get the PID of the background process
+      const { exitCode: psExit } = await this.exec(
+        ["ps", "aux", "|", "grep", "[n]ode-agent"],
+        { stdout: "pipe", stderr: "pipe" }
+      );
+
+      if (psExit === 0) {
+        console.log(`  ✓ ${this.name} started and listening on port 8911 (logs: ${logPath})`);
+      } else {
+        console.log(`  ⚠ ${this.name} started but status unknown (logs: ${logPath})`);
+      }
+    }
   }
 }

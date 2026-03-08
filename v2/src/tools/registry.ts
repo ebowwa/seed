@@ -13,6 +13,14 @@ import { GhTool } from "./gh";
 import { DopplerTool } from "./doppler";
 import { NodeTool } from "./node";
 import { TmuxTool } from "./tmux";
+import { RalphTool } from "./ralph";
+import { BashOpsTool } from "./bash-ops";
+import { HetznerMCPTool } from "./hetzner-mcp";
+import { TailscaleMCPTool } from "./tailscale-mcp";
+import { NpmPublishMCPTool } from "./npm-publish-mcp";
+import { GitMCPTool } from "./git-mcp";
+import { WorkspaceMCPTool } from "./workspace-mcp";
+import { DependencyGraphMCPTool } from "./dependency-graph-mcp";
 
 export interface Tool {
   name: string;
@@ -52,8 +60,17 @@ export class ToolRegistry {
       new NodeAgentTool(),
       new ClaudeTool(),
       new LaneTool(),
+      new RalphTool(),
       new GhTool(),
       new DopplerTool(),
+      new BashOpsTool(),
+      // MCP Tools - Infrastructure only
+      new HetznerMCPTool(),
+      new TailscaleMCPTool(),
+      new NpmPublishMCPTool(),
+      new GitMCPTool(),
+      new WorkspaceMCPTool(),
+      new DependencyGraphMCPTool(),
     ];
   }
 
