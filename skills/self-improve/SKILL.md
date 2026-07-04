@@ -50,7 +50,6 @@ Based on your analysis, generate 1-3 specific improvements:
 
 **Codebase Improvements:**
 - New skills that would extend capabilities
-- Refactoring opportunities in node-agent
 - Automation opportunities (reducing manual steps)
 - Security hardening
 

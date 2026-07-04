@@ -95,7 +95,7 @@ fi
 # ============================================================================
 
 print_info "Starting Seed Setup v2 with 4-phase parallel installation..."
-print_info "Phase 1: curl tools (claude, doppler) | Phase 2: bun | Phase 3: bun-dependent (lane, node-agent) | Phase 4: apt tools (node, tmux, gh)"
+print_info "Phase 1: curl tools (claude, doppler) | Phase 2: bun | Phase 3: bun-dependent (lane, ralph) | Phase 4: apt tools (node, tmux, gh)"
 
 # Check if v2/src/index.ts exists
 if [ ! -f "${V2_DIR}/src/index.ts" ]; then

@@ -141,14 +141,6 @@ show_usage() {
   log "" ""
   log "  Usage:" "$BLUE"
   log "    doppler run --project seed --config prd -- claude '/go \"task\" --completion-promise DONE' -p" "$YELLOW"
-
-  log "" ""
-  log "  Check Node Agent status:" "$BLUE"
-  log "    curl http://localhost:8911/api/status" "$YELLOW"
-
-  log "" ""
-  log "  View Ralph loops:" "$BLUE"
-  log "    curl http://localhost:8911/api/ralph-loops" "$YELLOW"
   log "" ""
 }
 

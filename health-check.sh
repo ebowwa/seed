@@ -48,14 +48,12 @@ echo ""
 # Services
 echo "=== Services ==="
 FAILED=0
-check_service node-agent.service || FAILED=1
 check_service telegram-bot.service || FAILED=1
 check_service tailscaled.service || FAILED=1
 echo ""
 
 # Network Ports
 echo "=== Network Ports ==="
-check_port 8911 || FAILED=1  # Node Agent API
 echo ""
 
 # Tailscale
@@ -66,25 +64,6 @@ if [ -n "$TAILSCALE_IP" ]; then
 else
     echo -e "${RED}✗${NC} Not connected"
     FAILED=1
-fi
-echo ""
-
-# Node Agent Status
-echo "=== Node Agent Status ==="
-if command -v curl &> /dev/null; then
-    STATUS=$(curl -s http://localhost:8911/api/status 2>/dev/null)
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✓${NC} API responding"
-        echo "  CPU: $(echo $STATUS | jq -r '.capacity.cpu_percent' 2>/dev/null || echo 'N/A')%"
-        echo "  Memory: $(echo $STATUS | jq -r '.capacity.memory_percent' 2>/dev/null || echo 'N/A')%"
-        echo "  Ralph Loops: $(echo $STATUS | jq '.ralph_loops | length' 2>/dev/null || echo 'N/A')"
-        echo "  Worktrees: $(echo $STATUS | jq '.worktrees | length' 2>/dev/null || echo 'N/A')"
-    else
-        echo -e "${RED}✗${NC} API not responding"
-        FAILED=1
-    fi
-else
-    echo -e "${YELLOW}⚠${NC} curl not available, skipping API check"
 fi
 echo ""
 

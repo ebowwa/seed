@@ -222,8 +222,6 @@ function main() {
                     log("  Settings verified: ".concat(settingsOk ? "✓" : "!"), settingsOk ? "green" : "yellow");
                     log("\n  Usage:", "blue");
                     log("    doppler run --project seed --config prd -- claude '/go \"task\" --completion-promise DONE' -p", "yellow");
-                    log("\n  Check status:", "blue");
-                    log("    curl http://localhost:8911/api/status", "yellow");
                     log("\n");
                     return [2 /*return*/];
             }
