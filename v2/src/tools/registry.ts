@@ -6,7 +6,6 @@
 import type { Environment } from "../env/detect";
 import type { SetupOptions } from "../env/packages";
 import { BunTool } from "./bun";
-import { NodeAgentTool } from "./node-agent";
 import { ClaudeTool } from "./claude";
 import { LaneTool } from "./lane";
 import { GhTool } from "./gh";
@@ -57,7 +56,6 @@ export class ToolRegistry {
       new BunTool(),
       new NodeTool(),
       new TmuxTool(),
-      new NodeAgentTool(),
       new ClaudeTool(),
       new LaneTool(),
       new RalphTool(),

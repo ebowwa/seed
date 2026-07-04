@@ -42,7 +42,6 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ToolRegistry = void 0;
 var bun_1 = require("./bun");
-var node_agent_1 = require("./node-agent");
 var claude_1 = require("./claude");
 var lane_1 = require("./lane");
 var gh_1 = require("./gh");
@@ -60,7 +59,6 @@ var ToolRegistry = /** @class */ (function () {
             new bun_1.BunTool(),
             new node_1.NodeTool(),
             new tmux_1.TmuxTool(),
-            new node_agent_1.NodeAgentTool(),
             new claude_1.ClaudeTool(),
             new lane_1.LaneTool(),
             new ralph_1.RalphTool(),

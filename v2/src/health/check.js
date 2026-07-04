@@ -130,17 +130,6 @@ function checkToolHealth(name, env) {
                             }];
                     }
                     // Get version with timeout
-                    // TINKER: Some tools (like node-agent) may hang on --version
-                    // Skip node-agent version check since it starts a server
-                    if (name === "node-agent") {
-                        return [2 /*return*/, {
-                                name: name,
-                                description: getToolDescription(name),
-                                installed: true,
-                                version: "v0.1.0",
-                                path: "custom",
-                            }];
-                    }
                     version = "";
                     _b.label = 2;
                 case 2:
@@ -194,7 +183,6 @@ function checkToolHealth(name, env) {
 function getToolDescription(name) {
     var descriptions = {
         bun: "Fast JavaScript runtime and package manager",
-        "node-agent": "Ralph Loop orchestration API server",
         claude: "Claude Code CLI - AI-powered development assistant",
         gh: "GitHub CLI - Official GitHub command-line tool",
         doppler: "Doppler CLI - Secrets management",

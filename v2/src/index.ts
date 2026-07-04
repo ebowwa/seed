@@ -155,7 +155,7 @@ async function main() {
   // ============================================================================
   // Phase 1: curl-based installers (claude, doppler) - no dependencies
   // Phase 2: bun (verification only, script runs on it)
-  // Phase 3: bun-dependent tools (lane, node-agent) - require bun for build
+  // Phase 3: bun-dependent tools (lane, ralph) - require bun for build
   // Phase 4: apt-based tools (node, tmux, gh) - serial due to dpkg lock
   // ============================================================================
 
@@ -164,7 +164,7 @@ async function main() {
   );
   const bunTool = toolsToInstall.find((t) => t.name === "bun");
   const bunDependentTools = toolsToInstall.filter((t) =>
-    ["lane", "node-agent", "ralph"].includes(t.name)
+    ["lane", "ralph"].includes(t.name)
   );
   const aptTools = toolsToInstall.filter((t) =>
     ["node", "tmux", "gh"].includes(t.name)
@@ -299,7 +299,7 @@ async function main() {
 
   // ============================================================================
   // PHASE 3: bun-dependent tools (require bun for build/install)
-  // Tools: lane, node-agent, ralph
+  // Tools: lane, ralph
   // ============================================================================
   if (bunDependentTools.length > 0) {
     const phaseStart = performance.now();

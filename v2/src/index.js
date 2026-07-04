@@ -173,7 +173,7 @@ function main() {
                     });
                     bunTool = toolsToInstall.find(function (t) { return t.name === "bun"; });
                     bunDependentTools = toolsToInstall.filter(function (t) {
-                        return ["lane", "node-agent", "ralph"].includes(t.name);
+                        return ["lane", "ralph"].includes(t.name);
                     });
                     aptTools = toolsToInstall.filter(function (t) {
                         return ["node", "tmux", "gh"].includes(t.name);

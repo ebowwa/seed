@@ -115,18 +115,6 @@ async function checkToolHealth(
   }
 
   // Get version with timeout
-  // TINKER: Some tools (like node-agent) may hang on --version
-  // Skip node-agent version check since it starts a server
-  if (name === "node-agent") {
-    return {
-      name,
-      description: getToolDescription(name),
-      installed: true,
-      version: "v0.1.0",
-      path: "custom",
-    };
-  }
-
   // Add 5 second timeout to prevent hanging, explicitly kill process
   let version = "";
   try {
@@ -178,7 +166,6 @@ async function checkToolHealth(
 function getToolDescription(name: string): string {
   const descriptions: Record<string, string> = {
     bun: "Fast JavaScript runtime and package manager",
-    "node-agent": "Ralph Loop orchestration API server",
     claude: "Claude Code CLI - AI-powered development assistant",
     gh: "GitHub CLI - Official GitHub command-line tool",
     doppler: "Doppler CLI - Secrets management",
