@@ -43,7 +43,6 @@ cd seed
 | **GitHub MCP** | Repository intelligence |
 | **chat.sh** | Persistent Claude conversations |
 | **Ralph Iterative** | "Mr. Meeseeks Mode" - Autonomous AI loops |
-| **Node Agent** | Multi-node Ralph orchestration (port 8911) |
 
 ## Ralph Iterative - "Mr. Meeseeks Mode"
 
@@ -78,59 +77,10 @@ doppler run --project seed --config prd -- claude '/quit' -p
 **Features:**
 - ✅ Loops indefinitely until completion signal
 - ✅ Tracks state in `.claude/.ralph-iterative.local.json`
-- ✅ Monitored by Node Agent (GUI dashboard)
 - ✅ SLAM subagents (planner, executor, paranoid, reviewer)
 - ✅ Git integration (auto-commit, PRs)
 
 📖 **Full Documentation:** [RALPH-ITERATIVE-SETUP.md](./RALPH-ITERATIVE-SETUP.md)
-
-## Multi-Node Setup
-
-### Node Architecture
-
-```
-Coordinator Node (seed-node-prod)
-├── PM Daemon: Orchestrates work across nodes
-└── Node Agent API: :8911
-
-Worker Nodes (seed-node-1, seed-node-2, ...)
-├── Node Agent: Executes assigned tasks
-└── Ralph Iterative: Runs autonomous loops
-```
-
-### Quick Setup for New Nodes
-
-```bash
-# 1. Bootstrap script (coming soon)
-curl -fsSL https://raw.githubusercontent.com/ebowwa/seed/main/bootstrap-node.sh | bash
-
-# 2. Manual setup
-git clone https://github.com/ebowwa/seed.git
-cd seed
-./setup.sh
-
-# 3. Register with coordinator
-curl -X POST http://100.71.68.25:8911/api/nodes/register \
-  -H "Content-Type: application/json" \
-  -d '{"node_name": "seed-node-1", "role": "worker"}'
-```
-
-### Node Management
-
-```bash
-# Check node health
-curl http://localhost:8911/api/health
-
-# List all nodes
-curl http://localhost:8911/api/nodes
-
-# Submit work to node
-curl -X POST http://localhost:8911/api/ralph/start \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Fix the authentication bug", "target_node": "seed-node-1"}'
-```
-
-📖 **Full Documentation:** [NODE-SETUP-GUIDE.md](./NODE-SETUP-GUIDE.md)
 
 ## Configuration
 

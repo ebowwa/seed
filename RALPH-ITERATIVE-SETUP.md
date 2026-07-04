@@ -24,7 +24,6 @@ doppler run --project seed --config prd -- claude '/go "Your task here" --comple
 Ralph Iterative is a Claude Code plugin that:
 - **Loops indefinitely** until a completion signal is received
 - **Tracks state** in `.claude/.ralph-iterative.local.json`
-- **Monitored by Node Agent** on port 8911
 - **Uses subagents** for planning, execution, review, fixing
 
 ---
@@ -144,26 +143,6 @@ Location: `.claude/.ralph-iterative.local.json`
 
 ---
 
-## Node Agent Integration
-
-Ralph loops are **automatically tracked** by Node Agent:
-
-```bash
-# Check Node Agent status
-curl http://localhost:8911/api/status
-
-# View Ralph loops
-curl http://localhost:8911/api/ralph-loops
-```
-
-The GUI dashboard at `http://localhost:3000` also shows:
-- Active Ralph loops
-- Iteration counts
-- Completion status
-- Resource usage
-
----
-
 ## Troubleshooting
 
 ### "Unknown skill: ralph-iterative:go"
@@ -215,15 +194,13 @@ With `--enable-subagents`, Ralph uses specialized subagents:
 ## Best Practices
 
 1. **Always use completion promises** - otherwise Ralph loops forever
-2. **Run in monitored directories** - `~/seed`, `~/seed/node-agent` for Node Agent tracking
-3. **Use worktrees for isolation** - `--use-lane` or `--use-worktree`
-4. **Enable subagents for complex tasks** - `--enable-subagents`
-5. **Check status periodically** - `/ralph-iterative-status`
+2. **Use worktrees for isolation** - `--use-lane` or `--use-worktree`
+3. **Enable subagents for complex tasks** - `--enable-subagents`
+4. **Check status periodically** - `/ralph-iterative-status`
 
 ---
 
 ## Resources
 
 - [Ralph Iterative Source](https://github.com/ebowwa/ralph)
-- [Node Agent Docs](../node-agent/docs/)
 - [SLAM Pattern](../docs/SLAM_PATTERN.md)
