@@ -110,7 +110,7 @@ cd seed
 ./setup.sh
 
 # 3. Register with coordinator
-curl -X POST http://100.71.68.25:8911/api/nodes/register \
+curl -X POST http://<COORDINATOR_IP>:8911/api/nodes/register \
   -H "Content-Type: application/json" \
   -d '{"node_name": "seed-node-1", "role": "worker"}'
 ```
