@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>actions.runner.ebowwa-secondsee.mac-mini</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/Users/macos-ebowwa/actions-runner/runsvc.sh</string>
+    </array>
+    <key>UserName</key>
+    <string>macos-ebowwa</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/macos-ebowwa/actions-runner</string>
+    <key>RunAtLoad</key>
+    <true/>    
+    <key>StandardOutPath</key>
+    <string>/Users/macos-ebowwa/Library/Logs/actions.runner.ebowwa-secondsee.mac-mini/stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/macos-ebowwa/Library/Logs/actions.runner.ebowwa-secondsee.mac-mini/stderr.log</string>
+    <key>EnvironmentVariables</key>
+    <dict> 
+      <key>ACTIONS_RUNNER_SVC</key>
+      <string>1</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>SessionCreate</key>
+    <true/>
+  </dict>
+</plist>

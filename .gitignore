@@ -1,53 +1,21 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-doppler.env
-*dist
-# OS files
+# OS
 .DS_Store
 Thumbs.db
-v2/seed-setup
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
 
-# Logs
-*.log
-logs/
-
-# Temporary files
-*.tmp
-temp/
-tmp/
-state/
-
-# Backup files
-*.bak
-*.backup
-
-# Node/Bun
-node_modules/
-
-
+# Secrets
+.env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-.Python
-venv/
+.venv/
 
-# Environment directories (but allow v2/src/env)
-env/
-!v2/src/env/
+# Node
+node_modules/
 
-# Secrets
-*.key
-*.pem
-*.cert
-doppler.envv2/seed-setup
-tests/results/
-.seed-setup-complete
+# IDE
+.vscode/
+.idea/
+*.swp
